@@ -12,6 +12,10 @@ set(JOLT_IDL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS.idl)
 set(OUTPUT_FOLDER ${CMAKE_CURRENT_SOURCE_DIR}/dist/)
 set(JOLT_TYPING ${OUTPUT_FOLDER}/types.d.ts)
 
+# NILO: fork additions live in cmake/NiloFork.cmake. Read it for context on the
+# `nilo_*` macro calls and the in-place `# NILO:` breadcrumbs scattered below.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NiloFork.cmake")
+
 # Option to turn on memory profiling
 option(ENABLE_MEMORY_PROFILER "Enable emscriptens memory profiler to help find leaks" OFF)
 
@@ -48,7 +52,9 @@ set(INTERPROCEDURAL_OPTIMIZATION OFF)
 # Override debug symbols
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	set(GENERATE_DEBUG_SYMBOLS ON)
-	set(JPH_DEBUG_SYMBOL_FORMAT "source-map" CACHE STRING "")
+	# NILO: full DWARF (level 3) instead of upstream's "source-map" — needed by Chrome's
+	# C/C++ DevTools Support extension; sidecar .wasm.map is unreachable in wasm-compat.
+	set(JPH_DEBUG_SYMBOL_FORMAT "3" CACHE STRING "")
 else()
 	set(GENERATE_DEBUG_SYMBOLS OFF)
 endif()
@@ -73,7 +79,8 @@ if (ENABLE_MULTI_THREADING)
 		-s PTHREAD_POOL_SIZE=16)
 	set(CMAKE_CXX_FLAGS "-pthread -s SHARED_MEMORY")
 	set(OUTPUT_BASE_NAME "${OUTPUT_FOLDER}jolt-physics.multithread")
-	set(REMOVE_THREAD_LOCAL "")
+	# NILO: was `set(REMOVE_THREAD_LOCAL "")` — empty COMMAND breaks Windows Ninja's cmd.exe.
+	set(REMOVE_THREAD_LOCAL "${CMAKE_COMMAND}" -E true)
 else()
 	set(MULTI_THREADED_FLAG "")
 	set(ENVIRONMENT_FLAG -s ENVIRONMENT=web,node,worker)
@@ -83,12 +90,10 @@ else()
 	# Removing 'thread_local' from the generated binding code fixes a small 'residual' allocation
 	# in the proper_cleanup.html demo and it is not needed when in single threaded mode.
 	# See: https://github.com/jrouwe/JoltPhysics.js/discussions/222#discussioncomment-11381106
-	set(REMOVE_THREAD_LOCAL sed -i.bak -e "s:thread_local::g" glue.cpp)
+	# NILO: was `sed -i.bak -e "s:thread_local::g" glue.cpp` — Python helper for Windows compat.
+	set(REMOVE_THREAD_LOCAL "${Python3_EXECUTABLE}" "${JOLT_BUILD_TOOLS}" strip-thread-local glue.cpp)
 endif()
-
-# Replace 'replace_by_import' by 'import' in the generated JS code to workaround a bug in emscripten
-# See: https://github.com/jrouwe/JoltPhysics.js/issues/245
-set(REPLACE_IMPORT sed -i -e "s:replace_by_import:import:g")
+nilo_apply_output_name_suffix()
 
 # Enable SIMD flags
 if (ENABLE_SIMD)
@@ -102,14 +107,16 @@ else()
 endif()
 
 # Include Jolt
-include(FetchContent)
-FetchContent_Declare(
-        JoltPhysics
-        GIT_REPOSITORY "https://github.com/jrouwe/JoltPhysics"
-        GIT_TAG "v5.5.0"
-		SOURCE_SUBDIR "Build"
-)
-FetchContent_MakeAvailable(JoltPhysics)
+# NILO: FetchContent override (JOLT_PHYSICS_PATH / GIT_REPO / GIT_TAG cache vars are
+# defined in cmake/NiloFork.cmake). Replaces upstream's `FetchContent_Declare(JoltPhysics
+# GIT_REPOSITORY ... GIT_TAG ... SOURCE_SUBDIR Build) + FetchContent_MakeAvailable`.
+nilo_declare_jolt_physics_fetchcontent()
+# NILO: resolve canonical C++ repo root and override Jolt target's include dirs so DWARF
+# prefix maps and Ninja-emitted -I paths agree on a single absolute prefix.
+nilo_resolve_jolt_physics_source_root()
+# NILO: compute portable DWARF prefix-map flags (Debug only) and apply to Jolt target.
+# Sets JPH_DEBUG_PREFIX_MAP_FLAGS, referenced below in EMCC_ARGS / EMCC_GLUE_ARGS.
+nilo_compute_debug_prefix_map_flags()
 
 # Enable resizable heap, with some amount of slowness. Default is 128*1024*1024 = 128MB
 if (ALLOW_MEMORY_GROWTH)
@@ -130,15 +137,15 @@ else()
 	set(INCLUDE_DEMANGLE_ALL_FLAG "")
 endif()
 
+# NILO: closure pass gating for fast dev iteration. Sets JPH_CLOSURE_ARGS.
+nilo_compute_closure_args()
+
 set(EMCC_ARGS
   -fno-rtti
   -fno-exceptions
   --extern-pre-js ${JOLT_FRONT_MATTER_FILE}
   --post-js glue.js
-  --closure=1
-  --closure-args="--dynamic_import_alias=replace_by_import"
-  --closure-args="--externs"
-  --closure-args="${CMAKE_CURRENT_SOURCE_DIR}/extern-import.js"
+  ${JPH_CLOSURE_ARGS}                                  # NILO: was `--closure=1 ...` literals; now gated by JPH_DEV_FAST_LINK.
   ${MULTI_THREADED_FLAG}
   --post-js ${CMAKE_CURRENT_SOURCE_DIR}/helpers.js
   ${MEMORY_GROWTH_FLAG}
@@ -160,6 +167,7 @@ set(EMCC_ARGS
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	set(EMCC_ARGS
 		${EMCC_ARGS}
+		${JPH_DEBUG_PREFIX_MAP_FLAGS}                  # NILO: portable DWARF paths.
 		-g${JPH_DEBUG_SYMBOL_FORMAT}
 		-s ASSERTIONS)
 else()
@@ -184,7 +192,7 @@ set(EMCC_WASM_COMPAT_ARGS ${EMCC_WASM_ARGS}
 
 set(EMCC_GLUE_ARGS
   -c
-  -I${JoltPhysics_SOURCE_DIR}/..
+  -I${JPH_JOLT_PHYSICS_SOURCE_ROOT}                    # NILO: was `-I${JoltPhysics_SOURCE_DIR}/..`; that points at the JS workspace and breaks `#include "Jolt/Jolt.h"` when the C++ checkout is a sibling.
   -Wall
   -std=c++17
   -fno-rtti
@@ -201,6 +209,7 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	set(JOLT_IDL_FILE ${JOLT_IDL_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS-DebugRenderer.idl )
 	set(EMCC_GLUE_ARGS
 		${EMCC_GLUE_ARGS}
+		${JPH_DEBUG_PREFIX_MAP_FLAGS}                  # NILO: portable DWARF paths for glue.cpp.
 		-DJPH_DEBUG_RENDERER -DJPH_PROFILE_ENABLED -D_DEBUG)
 elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
 	set(JOLT_IDL_FILE ${JOLT_IDL_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS-DebugRenderer.idl )
@@ -232,10 +241,11 @@ add_custom_command(
 add_custom_command(
 	OUTPUT glue.cpp glue.js jolt.idl
 	BYPRODUCTS parser.out WebIDLGrammar.pkl
-	COMMAND cat ${JOLT_IDL_FILE} > jolt.idl
+	# NILO: was `cat ${JOLT_IDL_FILE} > jolt.idl` — Python helper for Windows compat.
+	COMMAND ${Python3_EXECUTABLE} "${JOLT_BUILD_TOOLS}" concat-idl jolt.idl ${JOLT_IDL_FILE}
 	COMMAND ${PYTHON} ${WEBIDL_BINDER_SCRIPT} jolt.idl glue
 	COMMAND ${REMOVE_THREAD_LOCAL}
-	DEPENDS ${JOLT_IDL_FILE}
+	DEPENDS ${JOLT_IDL_FILE} "${JOLT_BUILD_TOOLS}"
 	COMMENT "Generating JoltPhysics.js bindings"
 	VERBATIM)
 
@@ -262,7 +272,7 @@ if (NOT BUILD_WASM_COMPAT_ONLY)
 	add_custom_command(
 		OUTPUT ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm
 		COMMAND emcc glue.o $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
-		COMMAND ${REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm.js
+		COMMAND ${JOLT_REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm.js     # NILO: emscripten#245 workaround.
 		DEPENDS jolt-bindings ${JOLT_FRONT_MATTER_FILE} ${JOLT_TARGETS} ${JOLT_IDL_FILE} ${JOLT_HEADER_FILE}
 		COMMENT "Building JoltPhysics.js webassembly"
 		VERBATIM)
@@ -272,7 +282,7 @@ endif()
 add_custom_command(
 	OUTPUT ${OUTPUT_BASE_NAME}.wasm-compat.js
 	COMMAND emcc glue.o $<TARGET_FILE:Jolt> ${EMCC_WASM_COMPAT_ARGS} -o ${OUTPUT_BASE_NAME}.wasm-compat.js
-	COMMAND ${REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm-compat.js
+	COMMAND ${JOLT_REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm-compat.js   # NILO: emscripten#245 workaround.
 	DEPENDS jolt-bindings ${JOLT_FRONT_MATTER_FILE} ${JOLT_TARGETS} ${JOLT_IDL_FILE} ${JOLT_HEADER_FILE}
 	COMMENT "Building JoltPhysics.js compat webassembly"
 	VERBATIM)
