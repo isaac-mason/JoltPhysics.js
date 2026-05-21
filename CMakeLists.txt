@@ -32,7 +32,7 @@ option(ENABLE_SIMD "Enable SIMD instructions (warning: last major browser to sup
 option(BUILD_WASM_COMPAT_ONLY "Compile online the WASM compat version of the library (speeds up compilation)" OFF)
 
 # Enable for resizable heap, with some amount of slowness
-option(ALLOW_MEMORY_GROWTH "Allow Memory Growth" OFF)
+option(ALLOW_MEMORY_GROWTH "Allow Memory Growth" ON)
 
 # Default initial memory size is 128*1024*1024 = 128MB
 set(INITIAL_MEMORY 134217728 CACHE STRING "Initial Memory")
