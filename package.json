@@ -1,6 +1,6 @@
 {
 	"name": "@nilo-technologies/jolt-physics",
-	"version": "5.5.0-nilo.10",
+	"version": "5.5.0-nilo.11",
 	"description": "A WebAssembly port of JoltPhysics, a rigid body physics and collision detection library, suitable for games and VR applications",
 	"type": "module",
 	"main": "dist/jolt-physics.wasm-compat.js",

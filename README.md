@@ -115,7 +115,7 @@ Almost the entire Jolt interface has been exposed. Check [JoltJS.idl](https://gi
 Pin the GitHub Release tarball directly in `package.json`:
 
 ```json
-"jolt-physics": "https://github.com/nilo-technologies/JoltPhysics.js/releases/download/v5.5.0-nilo.10/nilo-technologies-jolt-physics-5.5.0-nilo.10.tgz"
+"jolt-physics": "https://github.com/nilo-technologies/JoltPhysics.js/releases/download/v5.5.0-nilo.11/nilo-technologies-jolt-physics-5.5.0-nilo.11.tgz"
 ```
 
 (Substitute the latest version from [Releases](https://github.com/nilo-technologies/JoltPhysics.js/releases).) `pnpm install` / `npm install` fetches the tarball and pins its integrity hash in the lockfile. No registry or auth involved. The dep-key (`jolt-physics` here) becomes the import name; pick whatever suits your codebase, but `jolt-physics` matches upstream's docs.
