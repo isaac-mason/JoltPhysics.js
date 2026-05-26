@@ -16,6 +16,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
     inputs:
+      jpjs_ref:
+        description: "JoltPhysics.js ref to build. Empty = latest v*-nilo.* tag in this repo (default). Pass `nilo` to build the head of the nilo branch, or any tag/SHA to pin."
+        required: false
+        default: ""
+        type: string
       jolt_ref:
         description: "Jolt C++ ref: tag or branch name that exists on GitHub (e.g. nilo-v5.5.0 or master). Push paired tags first: git push origin nilo-v5.5.0"
         required: false
@@ -40,8 +45,45 @@ jobs:
       JOLT_PHYSICS_CHECKOUT_REF: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.jolt_ref || 'nilo-v5.5.0') || 'nilo-v5.5.0' }}
 
     steps:
+    # Default workflow_dispatch behavior of `actions/checkout` is "build the dispatched
+    # branch's HEAD", which means a manual run from the GitHub UI builds whatever is
+    # currently on `nilo` -- easy to ship a half-finished commit. Instead, default to the
+    # latest `v*-nilo.*` tag (release tags are only ever cut from `nilo`, so this is
+    # equivalent to "latest release on nilo") and require an explicit override to build
+    # anything else. `git ls-remote` doesn't need a checked-out repo, so this step runs
+    # before `actions/checkout`.
+    - name: Resolve JoltPhysics.js ref to build
+      id: resolve_jpjs_ref
+      shell: bash
+      run: |
+        set -euo pipefail
+        INPUT_REF="${{ github.event.inputs.jpjs_ref }}"
+        if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+          # Push events build the pushed commit verbatim (preserves auto-publish on main).
+          REF="${GITHUB_SHA}"
+          echo "Push event: building ${REF}"
+        elif [ -n "${INPUT_REF}" ]; then
+          REF="${INPUT_REF}"
+          echo "Override: building user-supplied ref '${REF}'"
+        else
+          REMOTE="https://github.com/${GITHUB_REPOSITORY}"
+          # `--sort=-version:refname` puts the highest semver-style version first; the
+          # `^{}` filter drops dereferenced annotated-tag rows.
+          LATEST_TAG=$(git ls-remote --tags --sort='-version:refname' "${REMOTE}" 'refs/tags/v*-nilo.*' \
+            | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}$' | head -n 1)
+          if [ -z "${LATEST_TAG}" ]; then
+            echo "::error::No v*-nilo.* tags found on ${REMOTE}. Tag a release on nilo (e.g. v5.5.0-nilo.11) or pass jpjs_ref explicitly (e.g. 'nilo' for branch HEAD)."
+            exit 1
+          fi
+          REF="${LATEST_TAG}"
+          echo "Default: building latest v*-nilo.* tag '${REF}'"
+        fi
+        echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
     - name: Checkout Code
       uses: actions/checkout@v6
+      with:
+        ref: ${{ steps.resolve_jpjs_ref.outputs.ref }}
 
     # Shallow fetch (checkout default depth=1) often cannot resolve tags; depth=0 fixes that once the ref exists on GitHub.
     - name: Verify Jolt ref exists on GitHub
@@ -142,11 +184,16 @@ jobs:
       run: |
         set -euo pipefail
         VERSION="${{ steps.pkg_publish.outputs.version }}"
+        # The "ref" we record is what the user asked for (resolved tag, override, or
+        # SHA); the post-checkout SHA is what we actually built. Both are useful when
+        # tracing a release back to source.
+        BUILT_SHA=$(git rev-parse HEAD)
         {
           echo "npm_package_version=${VERSION}"
           echo "jolt_cpp_checkout_ref=${JOLT_PHYSICS_CHECKOUT_REF}"
           echo "joltphysics_js_repository=${GITHUB_REPOSITORY}"
-          echo "joltphysics_js_sha=${GITHUB_SHA}"
+          echo "joltphysics_js_ref=${{ steps.resolve_jpjs_ref.outputs.ref }}"
+          echo "joltphysics_js_sha=${BUILT_SHA}"
           echo "github_event=${GITHUB_EVENT_NAME}"
           echo "github_run_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
         } > dist/BUILD_INFO.txt
@@ -189,7 +236,7 @@ jobs:
           | Field | Value |
           | --- | --- |
           | Jolt C++ ref | `${{ env.JOLT_PHYSICS_CHECKOUT_REF }}` |
-          | JoltPhysics.js SHA | `${{ github.sha }}` |
+          | JoltPhysics.js ref | `${{ steps.resolve_jpjs_ref.outputs.ref }}` |
           | Workflow run | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |
         files: |
           jolt-physics-${{ steps.pkg_publish.outputs.version }}-dist.tar.gz
