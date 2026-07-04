@@ -22,6 +22,10 @@
 			"types": "./dist/jolt-physics.debug.wasm-compat.d.ts",
 			"default": "./dist/jolt-physics.debug.wasm-compat.js"
 		},
+		"./debug-wasm": {
+			"types": "./dist/jolt-physics.debug.wasm.d.ts",
+			"default": "./dist/jolt-physics.debug.wasm.js"
+		},
 		"./asm": {
 			"types": "./dist/jolt-physics.d.ts",
 			"default": "./dist/jolt-physics.js"
@@ -38,8 +42,14 @@
 			"types": "./dist/jolt-physics.debug.multithread.wasm-compat.d.ts",
 			"default": "./dist/jolt-physics.debug.multithread.wasm-compat.js"
 		},
+		"./debug-wasm-multithread": {
+			"types": "./dist/jolt-physics.debug.multithread.wasm.d.ts",
+			"default": "./dist/jolt-physics.debug.multithread.wasm.js"
+		},
 		"./jolt-physics.wasm.wasm": "./dist/jolt-physics.wasm.wasm",
+		"./jolt-physics.debug.wasm.wasm": "./dist/jolt-physics.debug.wasm.wasm",
 		"./jolt-physics.multithread.wasm.wasm": "./dist/jolt-physics.multithread.wasm.wasm",
+		"./jolt-physics.debug.multithread.wasm.wasm": "./dist/jolt-physics.debug.multithread.wasm.wasm",
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -59,6 +69,10 @@
 		"./dist/jolt-physics.wasm-compat.d.ts",
 		"./dist/jolt-physics.debug.wasm-compat.js",
 		"./dist/jolt-physics.debug.wasm-compat.d.ts",
+		"./dist/jolt-physics.debug.wasm.js",
+		"./dist/jolt-physics.debug.wasm.d.ts",
+		"./dist/jolt-physics.debug.wasm.wasm",
+		"./dist/jolt-physics.debug.wasm.wasm.map",
 		"./dist/jolt-physics.wasm.js",
 		"./dist/jolt-physics.wasm.d.ts",
 		"./dist/jolt-physics.wasm.wasm",
@@ -66,6 +80,10 @@
 		"./dist/jolt-physics.multithread.wasm-compat.d.ts",
 		"./dist/jolt-physics.debug.multithread.wasm-compat.js",
 		"./dist/jolt-physics.debug.multithread.wasm-compat.d.ts",
+		"./dist/jolt-physics.debug.multithread.wasm.js",
+		"./dist/jolt-physics.debug.multithread.wasm.d.ts",
+		"./dist/jolt-physics.debug.multithread.wasm.wasm",
+		"./dist/jolt-physics.debug.multithread.wasm.wasm.map",
 		"./dist/jolt-physics.multithread.wasm.js",
 		"./dist/jolt-physics.multithread.wasm.d.ts",
 		"./dist/jolt-physics.multithread.wasm.wasm",
@@ -74,9 +92,11 @@
 		"wasm",
 		"wasm-compat",
 		"debug-wasm-compat",
+		"debug-wasm",
 		"wasm-multithread",
 		"wasm-compat-multithread",
-		"debug-wasm-compat-multithread"
+		"debug-wasm-compat-multithread",
+		"debug-wasm-multithread"
 	],
 	"keywords": [
 		"physics",
@@ -90,7 +110,6 @@
 		"wasm"
 	],
 	"devDependencies": {
-		"express": "^4.19.2",
-		"webidl-dts-gen": "^1.11.0"
+		"express": "^4.19.2"
 	}
 }

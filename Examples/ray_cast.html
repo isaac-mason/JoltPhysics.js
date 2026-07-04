@@ -5,131 +5,58 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
 	</head>
 	<body>
 		<div id="container">Loading...</div>
-		<div id="info">JoltPhysics.js ray cast demo</div>
-
-		<script src="js/three/three.min.js"></script>
-		<script src="js/three/OrbitControls.js"></script>
-		<script src="js/three/WebGL.js"></script>
-		<script src="js/three/stats.min.js"></script>
-		<script src="js/example.js"></script>
+		<div id="info">JoltPhysics.js ray cast demo<br/>
+		Red rays; cyan markers = hit points; green lines = surface normals</div>
 
 		<script type="module">
-			// In case you haven't built the library yourself, replace URL with: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
-			import initJolt from './js/jolt-physics.wasm-compat.js';
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as Example from './js/example.js';
+			import { initExample, createFloor, createBox, addLine, addMarker, LAYER_MOVING, LAYER_NON_MOVING } from './js/example.js';
 
-			initJolt().then(function (Jolt) {
-				// Initialize this example
-				initExample(Jolt, null);
+			const Jolt = await initJolt();
+			initExample(Jolt, null);
+			const { jolt, physicsSystem } = Example;
+			const npq = physicsSystem.GetNarrowPhaseQuery();
 
-				// Create a basic floor
-				createFloor();
+			createFloor();
 
-				// Create some boxes
-				createBox(new Jolt.RVec3(0, 1, 0), Jolt.Quat.prototype.sIdentity(), new Jolt.Vec3(1, 1, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING, 0x00ff00);
-				createBox(new Jolt.RVec3(0, 1, 5), Jolt.Quat.prototype.sIdentity(), new Jolt.Vec3(1, 1, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING, 0x00ff00);
-				createBox(new Jolt.RVec3(0, 1, 10), Jolt.Quat.prototype.sIdentity(), new Jolt.Vec3(1, 1, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING, 0x00ff00);
-				createBox(new Jolt.RVec3(0, 1, 15), Jolt.Quat.prototype.sIdentity(), new Jolt.Vec3(1, 1, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING, 0x00ff00);
-				createBox(new Jolt.RVec3(0, 1, 20), Jolt.Quat.prototype.sIdentity(), new Jolt.Vec3(1, 1, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING, 0x00ff00);
+			// a row of boxes the rays will strike
+			for (let z = 0; z <= 20; z += 5)
+				createBox([0, 1, z], [0, 0, 0, 1], [1, 1, 1], Jolt.EMotionType.Static, LAYER_NON_MOVING, 0x00ff00);
 
-				// Create ray
-				let ray = new Jolt.RRayCast;
-				ray.mOrigin.Set(-5, 1, -1);
-				ray.mDirection.Set(10, 0, 2);
-				let drawRay = (ray) => {
-					addLine(ray.mOrigin, ray.mOrigin.Clone().Add(ray.mDirection), 0xff0000);
-				};
-				drawRay(ray);
+			const direction = [10, 0, 2];
+			const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+			const scale = (v, s) => [v[0] * s, v[1] * s, v[2] * s];
+			const drawRay = (origin) => addLine(origin, add(origin, direction), 0xff0000);
+			const drawHit = (hit) => {
+				addMarker(hit.point, 1, 0x00ffff);                              // hit point
+				addLine(hit.point, add(hit.point, scale(hit.normal, 2)), 0x00ff00);  // surface normal
+			};
 
-				// Create ray cast settings (e.g. if we want back face culling)
-				let raySettings = new Jolt.RayCastSettings;
+			// CastRayAll returns hits sorted near->far, each { bodyID, fraction, point, normal }.
+			const cast = (origin, closestOnly) => {
+				drawRay(origin);
+				const hits = npq.CastRayAll(new Jolt.RRayCast(origin, direction), LAYER_MOVING, jolt);
+				if (closestOnly) { if (hits.length) drawHit(hits[0]); }
+				else hits.forEach(drawHit);
+			};
 
-				// Perform the ray cast as if we were a moving object
-				let bpFilter = new Jolt.DefaultBroadPhaseLayerFilter(jolt.GetObjectVsBroadPhaseLayerFilter(), LAYER_MOVING);
-				let objectFilter = new Jolt.DefaultObjectLayerFilter(jolt.GetObjectLayerPairFilter(), LAYER_MOVING);
-				let bodyFilter = new Jolt.BodyFilter(); // We don't want to filter out any bodies
-				let shapeFilter = new Jolt.ShapeFilter(); // We don't want to filter out any shapes
-
-				// Create collector
-				let collector = new Jolt.CastRayCollectorJS;
-				let drawHit = (body, hit) => {
-					let hitPoint = ray.GetPointOnRay(hit.mFraction);
-					addMarker(hitPoint, 1, 0x00ffff);
-					let hitNormal = body.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, hitPoint);
-					addLine(hitPoint, hitPoint.Clone().Add(hitNormal.Mul(2)), 0x00ff00);
-				}
-				collector.OnBody = (body) => {
-					body = Jolt.wrapPointer(body, Jolt.Body);
-					collector.body = body; // Store the body for the AddHit callback, note this is called whenever there is a collision with the bounding box of the object so you may not receive an AddHit callback for this body
-				};
-				collector.AddHit = (rayCastResult) => {
-					rayCastResult = Jolt.wrapPointer(rayCastResult, Jolt.RayCastResult);
-					drawHit(collector.body, rayCastResult);
-					
-					// Update the collector so that it won't receive any hits further away than this hit
-					collector.UpdateEarlyOutFraction(rayCastResult.mFraction);
-				};
-				collector.Reset = () => {
-					// Reset your bookkeeping, in any case we'll need to reset the early out fraction for the base class
-					collector.ResetEarlyOutFraction();
-				};
-
-				// Cast the ray against the first box
-				physicsSystem.GetNarrowPhaseQuery().CastRay(ray, raySettings, collector, bpFilter, objectFilter, bodyFilter, shapeFilter);
-				
-				// Recycle the collector
-				collector.Reset();
-
-				// Move the ray
-				ray.mOrigin.Set(-5, 1, 4);
-				drawRay(ray);
-
-				// Cast the ray against the second box
-				physicsSystem.GetNarrowPhaseQuery().CastRay(ray, raySettings, collector, bpFilter, objectFilter, bodyFilter, shapeFilter);
-
-				// Move the ray
-				ray.mOrigin.Set(-5, 1, 9);
-				drawRay(ray);
-
-				// Cast the ray against the third box using a closest hit collector
-				let closest_hit_collector = new Jolt.CastRayClosestHitCollisionCollector;
-				physicsSystem.GetNarrowPhaseQuery().CastRay(ray, raySettings, closest_hit_collector, bpFilter, objectFilter, bodyFilter, shapeFilter);
-				if (closest_hit_collector.HadHit()) { 
-					let body = physicsSystem.GetBodyLockInterfaceNoLock().TryGetBody(closest_hit_collector.mHit.mBodyID);
-					drawHit(body, closest_hit_collector.mHit);
-				}
-
-				// Move the ray
-				ray.mOrigin.Set(-5, 1, 14);
-				drawRay(ray);
-
-				// Turn off back face culling
-				raySettings.mBackFaceMode = Jolt.EBackFaceMode_CollideWithBackFaces;
-
-				// Cast the ray against the fourth box using an all hit collector
-				let all_hit_collector = new Jolt.CastRayAllHitCollisionCollector;
-				physicsSystem.GetNarrowPhaseQuery().CastRay(ray, raySettings, all_hit_collector, bpFilter, objectFilter, bodyFilter, shapeFilter);
-				for (let i = 0; i < all_hit_collector.mHits.size(); i++) {
-					let hit = all_hit_collector.mHits.at(i);
-					let body = physicsSystem.GetBodyLockInterfaceNoLock().TryGetBody(hit.mBodyID);
-					drawHit(body, hit);
-				}
-
-				// Move the ray
-				ray.mOrigin.Set(-5, 1, 19);
-				drawRay(ray);
-
-				// Cast the ray against the fifth box resetting the all hit collector
-				all_hit_collector.Reset();
-				physicsSystem.GetNarrowPhaseQuery().CastRay(ray, raySettings, all_hit_collector, bpFilter, objectFilter, bodyFilter, shapeFilter);
-				for (let i = 0; i < all_hit_collector.mHits.size(); i++) {
-					let hit = all_hit_collector.mHits.at(i);
-					let body = physicsSystem.GetBodyLockInterfaceNoLock().TryGetBody(hit.mBodyID);
-					drawHit(body, hit);
-				}
-			});
+			cast([-5, 1, -1], false);   // all hits along the ray
+			cast([-5, 1, 4], false);    // all hits
+			cast([-5, 1, 9], true);     // closest hit only
+			cast([-5, 1, 14], false);   // all hits (incl. back faces)
+			cast([-5, 1, 19], false);   // all hits
 		</script>
 	</body>
 </html>

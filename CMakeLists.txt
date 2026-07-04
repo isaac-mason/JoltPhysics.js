@@ -1,16 +1,15 @@
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
-FIND_PACKAGE(Python3)
-set(PYTHON ${Python3_EXECUTABLE} CACHE STRING "Python path")
 set(EMSCRIPTEN_ROOT $ENV{EMSDK}/upstream/emscripten CACHE STRING "Emscripten path")
 set(CMAKE_TOOLCHAIN_FILE ${EMSCRIPTEN_ROOT}/cmake/Modules/Platform/Emscripten.cmake)
-set(WEBIDL_BINDER_SCRIPT ${EMSCRIPTEN_ROOT}/tools/webidl_binder.py)
-set(JOLT_FRONT_MATTER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/front-matter.js)
+set(JOLT_PRE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pre.js)
+set(JOLT_POST_FILE ${CMAKE_CURRENT_SOURCE_DIR}/post.js)
+set(JOLT_NO_FINALIZER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/no-finalizer.js)
 set(JOLT_HEADER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS.h)
-set(JOLT_IDL_FILE ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS.idl)
+set(JOLT_BINDINGS_FILE ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
 set(OUTPUT_FOLDER ${CMAKE_CURRENT_SOURCE_DIR}/dist/)
-set(JOLT_TYPING ${OUTPUT_FOLDER}/types.d.ts)
+set(JOLT_TYPING ${OUTPUT_FOLDER}types.d.ts)
 
 # Option to turn on memory profiling
 option(ENABLE_MEMORY_PROFILER "Enable emscriptens memory profiler to help find leaks" OFF)
@@ -25,10 +24,19 @@ option(ENABLE_MULTI_THREADING "Compile the library in multi threading mode (warn
 option(ENABLE_SIMD "Enable SIMD instructions (warning: last major browser to support this was Safari 16.4 in March 2023)" OFF)
 
 # Option to speed up compilation by only compiling the WASM compat version
-option(BUILD_WASM_COMPAT_ONLY "Compile online the WASM compat version of the library (speeds up compilation)" OFF)
+option(BUILD_WASM_COMPAT_ONLY "Compile only the WASM compat version of the library (speeds up compilation)" OFF)
+
+# Option to build ONLY the separate-.wasm sidecar flavor (jolt-physics[.debug].wasm.js +
+# .wasm.wasm) — skips the base64 SINGLE_FILE compat build and the closure .js. Used for a
+# debuggable debug build: base64-embedded debug wasm OOMs bundlers (Vercel) and crashes
+# Chrome's C++/DWARF breakpoints, so debug also needs a separate-.wasm sidecar.
+option(BUILD_WASM_SIDECAR_ONLY "Compile only the separate-.wasm sidecar flavor" OFF)
 
 # Enable for resizable heap, with some amount of slowness
 option(ALLOW_MEMORY_GROWTH "Allow Memory Growth" OFF)
+
+# Closure-compile the JS glue (validated to work with embind; toggle off to isolate issues)
+option(USE_CLOSURE "Run the closure compiler on the generated JS" ON)
 
 # Default initial memory size is 128*1024*1024 = 128MB
 set(INITIAL_MEMORY 134217728 CACHE STRING "Initial Memory")
@@ -39,11 +47,13 @@ set(MAXIMUM_MEMORY 2147483648 CACHE STRING "Maximum Memory")
 # The configurations we support
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release;Distribution")
 
-# No floating point exception checking
-set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF)
-
-# Turn off LTO
-set(INTERPROCEDURAL_OPTIMIZATION OFF)
+# ---- Jolt library configuration ----
+set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF)  # No floating point exception checking
+set(INTERPROCEDURAL_OPTIMIZATION OFF)       # Turn off LTO
+set(DISABLE_CUSTOM_ALLOCATOR ON)            # Turn off custom allocator
+set(ENABLE_OBJECT_STREAM OFF)               # Turn off ObjectStream
+set(OBJECT_LAYER_BITS 32)                   # 32-bit object layers for ObjectLayerPairFilterMask
+set(CPP_RTTI_ENABLED ON)                    # embind auto-downcasting relies on C++ RTTI
 
 # Override debug symbols
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -52,15 +62,6 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 else()
 	set(GENERATE_DEBUG_SYMBOLS OFF)
 endif()
-
-# Turn off custom allocator
-set(DISABLE_CUSTOM_ALLOCATOR ON)
-
-# Turn off ObjectStream
-set(ENABLE_OBJECT_STREAM OFF)
-
-# Use 32-bit object layers to support more bits in ObjectLayerPairFilterMask
-set(OBJECT_LAYER_BITS 32)
 
 # Enable multi threading
 if (ENABLE_MULTI_THREADING)
@@ -72,29 +73,23 @@ if (ENABLE_MULTI_THREADING)
 		-s ENVIRONMENT=web,node,worker
 		-s PTHREAD_POOL_SIZE=16)
 	set(CMAKE_CXX_FLAGS "-pthread -s SHARED_MEMORY")
-	set(OUTPUT_BASE_NAME "${OUTPUT_FOLDER}jolt-physics.multithread")
-	set(REMOVE_THREAD_LOCAL "")
+	set(OUTPUT_MT_INFIX ".multithread")
 else()
 	set(MULTI_THREADED_FLAG "")
 	set(ENVIRONMENT_FLAG -s ENVIRONMENT=web,node,worker)
-	set(OUTPUT_BASE_NAME "${OUTPUT_FOLDER}jolt-physics")
-	# Tried to keep this multi-platform since windows/mac/linux all treat -i different,
-	# though this creates extra backup file in a non-tracked folder.
-	# Removing 'thread_local' from the generated binding code fixes a small 'residual' allocation
-	# in the proper_cleanup.html demo and it is not needed when in single threaded mode.
-	# See: https://github.com/jrouwe/JoltPhysics.js/discussions/222#discussioncomment-11381106
-	set(REMOVE_THREAD_LOCAL sed -i.bak -e "s:thread_local::g" glue.cpp)
+	set(OUTPUT_MT_INFIX "")
 endif()
 
-# Replace 'replace_by_import' by 'import' in the generated JS code to workaround a bug in emscripten
-# See: https://github.com/jrouwe/JoltPhysics.js/issues/245
-set(REPLACE_IMPORT sed -i -e "s:replace_by_import:import:g")
+# Debug builds get a .debug. infix so Debug/Distribution outputs don't overwrite each other
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+	set(OUTPUT_BASE_NAME "${OUTPUT_FOLDER}jolt-physics.debug${OUTPUT_MT_INFIX}")
+else()
+	set(OUTPUT_BASE_NAME "${OUTPUT_FOLDER}jolt-physics${OUTPUT_MT_INFIX}")
+endif()
 
 # Enable SIMD flags
 if (ENABLE_SIMD)
-	set(ENABLE_SIMD_FLAG
-		-msimd128
-		-msse4.2)
+	set(ENABLE_SIMD_FLAG -msimd128 -msse4.2)
 	set(USE_WASM_SIMD ON)
 else()
 	set(ENABLE_SIMD_FLAG "")
@@ -124,26 +119,34 @@ endif()
 if (ENABLE_MEMORY_PROFILER)
 	set(MEMORY_PROFILER_FLAG "--memoryprofiler")
 	set(INCLUDE_DEMANGLE_ALL_FLAG "-s DEFAULT_LIBRARY_FUNCS_TO_INCLUDE='$demangleAll'")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MEMORY_PROFILER_FLAG}")
 else()
 	set(MEMORY_PROFILER_FLAG "")
 	set(INCLUDE_DEMANGLE_ALL_FLAG "")
 endif()
 
+if (USE_CLOSURE)
+	set(CLOSURE_FLAG --closure=1)
+	set(CLOSURE_IMPORT_ARGS
+		"--closure-args=--dynamic_import_alias=replace_by_import"
+		"--closure-args=--externs"
+		"--closure-args=${CMAKE_CURRENT_SOURCE_DIR}/extern-import.js")
+else()
+	set(CLOSURE_FLAG "")
+	set(CLOSURE_IMPORT_ARGS "")
+endif()
+
+# ---- Link (JS-generation) args ----
 set(EMCC_ARGS
-  -fno-rtti
+  -lembind
   -fno-exceptions
-  --extern-pre-js ${JOLT_FRONT_MATTER_FILE}
-  --post-js glue.js
-  --closure=1
-  --closure-args="--dynamic_import_alias=replace_by_import"
-  --closure-args="--externs"
-  --closure-args="${CMAKE_CURRENT_SOURCE_DIR}/extern-import.js"
+  --js-library ${JOLT_NO_FINALIZER_FILE}
+  --extern-pre-js ${JOLT_PRE_FILE}
+  ${CLOSURE_FLAG}
+  ${CLOSURE_IMPORT_ARGS}
   ${MULTI_THREADED_FLAG}
-  --post-js ${CMAKE_CURRENT_SOURCE_DIR}/helpers.js
+  --post-js ${JOLT_POST_FILE}
   ${MEMORY_GROWTH_FLAG}
   -s ALLOW_TABLE_GROWTH=1
-  -s WASM_BIGINT=0
   ${ENVIRONMENT_FLAG}
   -s EXPORT_ES6=1
   -s EXPORT_NAME="Jolt"
@@ -158,14 +161,15 @@ set(EMCC_ARGS
   ${ENABLE_SIMD_FLAG})
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-	set(EMCC_ARGS
-		${EMCC_ARGS}
-		-g${JPH_DEBUG_SYMBOL_FORMAT}
-		-s ASSERTIONS)
+	set(EMCC_ARGS ${EMCC_ARGS} -g${JPH_DEBUG_SYMBOL_FORMAT} -s ASSERTIONS --closure=0)
 else()
-	set(EMCC_ARGS
-		${EMCC_ARGS}
-		-O3)
+	set(EMCC_ARGS ${EMCC_ARGS} -O3)
+endif()
+
+# Runtime bounds/alignment checking on every heap access (for hunting OOB bugs).
+option(SAFE_HEAP "Enable emscripten SAFE_HEAP memory checking" OFF)
+if (SAFE_HEAP)
+	set(EMCC_ARGS ${EMCC_ARGS} -s SAFE_HEAP=1)
 endif()
 
 set(EMCC_JS_ARGS ${EMCC_ARGS}
@@ -175,85 +179,69 @@ set(EMCC_JS_ARGS ${EMCC_ARGS}
   -s LEGACY_VM_SUPPORT=1
   -s WASM=0)
 
+# NOTE: -s BINARYEN_IGNORE_IMPLICIT_TRAPS=1 was removed — it assumes memory ops
+# never trap and, at -O3, corrupts embind's value_object marshalling (Vec3 write
+# -> "memory access out of bounds"). Harmless with the old WebIDL glue; not with embind.
 set(EMCC_WASM_ARGS ${EMCC_ARGS}
-  -s BINARYEN_IGNORE_IMPLICIT_TRAPS=1
+  -s WASM_BIGINT=1
   -s WASM=1)
 
 set(EMCC_WASM_COMPAT_ARGS ${EMCC_WASM_ARGS}
   -s SINGLE_FILE=1)
 
-set(EMCC_GLUE_ARGS
-  -c
-  -I${JoltPhysics_SOURCE_DIR}/..
-  -Wall
-  -std=c++17
-  -fno-rtti
-  -fno-exceptions
-  ${MULTI_THREADED_FLAG}
-  -DJPH_OBJECT_LAYER_BITS=32
-  -DJPH_DISABLE_CUSTOM_ALLOCATOR
-  -include ${JOLT_HEADER_FILE}
-  ${MEMORY_PROFILER_FLAG}
-  ${ENABLE_SIMD_FLAG})
-
-# Can't find a way to automatically inherit settings set by target_compile_definitions, so hardcoding defines here
-if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-	set(JOLT_IDL_FILE ${JOLT_IDL_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS-DebugRenderer.idl )
-	set(EMCC_GLUE_ARGS
-		${EMCC_GLUE_ARGS}
-		-DJPH_DEBUG_RENDERER -DJPH_PROFILE_ENABLED -D_DEBUG)
-elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
-	set(JOLT_IDL_FILE ${JOLT_IDL_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS-DebugRenderer.idl )
-	set(EMCC_GLUE_ARGS
-		${EMCC_GLUE_ARGS}
-		-DJPH_DEBUG_RENDERER -DJPH_PROFILE_ENABLED -DNDEBUG)
-elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Distribution")
-	set(EMCC_GLUE_ARGS
-		${EMCC_GLUE_ARGS}
-		-DNDEBUG)
-else()
-	message("Unknown CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
-endif()
-
-# Add double precision define
-if (DOUBLE_PRECISION)
-	set(EMCC_GLUE_ARGS ${EMCC_GLUE_ARGS} -DJPH_DOUBLE_PRECISION)
-endif()
-
 project("JoltPhysics.js")
 
+# ---- compile the embind bindings as an OBJECT library linked against Jolt so
+#      it inherits ALL of Jolt's PUBLIC compile definitions + include dirs.
+#      Compiling by hand risks an ABI/layout mismatch (missing a JPH_* define),
+#      which silently corrupts memory at runtime. ----
+add_library(jolt_bindings OBJECT ${JOLT_BINDINGS_FILE})
+target_link_libraries(jolt_bindings PRIVATE Jolt)
+target_compile_features(jolt_bindings PRIVATE cxx_std_17)
+target_compile_options(jolt_bindings PRIVATE -Wall -fno-exceptions ${ENABLE_SIMD_FLAG})
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+	target_compile_definitions(jolt_bindings PRIVATE JPH_DEBUG_RENDERER JPH_PROFILE_ENABLED _DEBUG)
+elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
+	target_compile_definitions(jolt_bindings PRIVATE JPH_DEBUG_RENDERER JPH_PROFILE_ENABLED NDEBUG)
+elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Distribution")
+	target_compile_definitions(jolt_bindings PRIVATE NDEBUG)
+else()
+	message(WARNING "Unknown CMAKE_BUILD_TYPE '${CMAKE_BUILD_TYPE}': no JPH_DEBUG_RENDERER or NDEBUG set")
+endif()
+set(JOLT_BINDINGS_OBJ $<TARGET_OBJECTS:jolt_bindings>)
+
+# ---- generate the .d.ts via --emit-tsd (dedicated non-closure link), then
+#      post-process (constructor param names, module rename) into dist ----
+set(JOLT_TYPING_RAW ${CMAKE_CURRENT_BINARY_DIR}/types.raw.d.ts)
+set(POSTPROCESS_TSD ${CMAKE_CURRENT_SOURCE_DIR}/scripts/postprocess-tsd.mjs)
+set(EXTRACT_META_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/scripts/extract-meta.mjs)
+set(JOLT_OUT_META  ${CMAKE_CURRENT_BINARY_DIR}/out-meta.json)
+set(JOLT_CTOR_META ${CMAKE_CURRENT_BINARY_DIR}/ctor-meta.json)
+set(JOLT_RET_META  ${CMAKE_CURRENT_BINARY_DIR}/ret-meta.json)
 add_custom_command(
 	OUTPUT ${JOLT_TYPING}
-	COMMAND npx webidl-dts-gen -e -d -i jolt.idl -o ${JOLT_TYPING} -n Jolt
-	DEPENDS jolt.idl
-	COMMENT "Generating JoltPhysics.js typing"
+	COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> -lembind --emit-tsd ${JOLT_TYPING_RAW}
+		-s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME="Jolt" -s WASM_BIGINT=1
+		-s ENVIRONMENT=web,node,worker -o ${CMAKE_CURRENT_BINARY_DIR}/types-probe.mjs
+	COMMAND node ${EXTRACT_META_SCRIPT}
+		${CMAKE_CURRENT_BINARY_DIR}/types-probe.mjs
+		${JOLT_OUT_META} ${JOLT_CTOR_META} ${JOLT_RET_META}
+	COMMAND node ${POSTPROCESS_TSD} ${JOLT_TYPING_RAW} ${JOLT_TYPING}
+		${JOLT_OUT_META} ${JOLT_CTOR_META} ${JOLT_RET_META}
+	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_TARGETS} ${POSTPROCESS_TSD} ${EXTRACT_META_SCRIPT}
+	COMMENT "Generating + post-processing JoltPhysics.js TypeScript definitions"
 	VERBATIM)
+add_custom_target(jolt-typing ALL DEPENDS ${JOLT_TYPING})
 
-add_custom_command(
-	OUTPUT glue.cpp glue.js jolt.idl
-	BYPRODUCTS parser.out WebIDLGrammar.pkl
-	COMMAND cat ${JOLT_IDL_FILE} > jolt.idl
-	COMMAND ${PYTHON} ${WEBIDL_BINDER_SCRIPT} jolt.idl glue
-	COMMAND ${REMOVE_THREAD_LOCAL}
-	DEPENDS ${JOLT_IDL_FILE}
-	COMMENT "Generating JoltPhysics.js bindings"
-	VERBATIM)
-
-add_custom_command(
-	OUTPUT glue.o
-	COMMAND emcc glue.cpp ${EMCC_GLUE_ARGS} -o glue.o
-	DEPENDS glue.cpp ${JOLT_HEADER_FILE}
-	COMMENT "Building JoltPhysics.js bindings"
-	VERBATIM)
-add_custom_target(jolt-bindings ALL DEPENDS glue.js glue.o ${JOLT_TYPING})
-
+# ---- flavor outputs ----
 if (NOT BUILD_WASM_COMPAT_ONLY)
-	if (NOT ENABLE_MULTI_THREADING # Not compatible with multi threading due to error: 'void wasm::I64ToI32Lowering::visitStore(Store *): Assertion `!curr->isAtomic && "atomic store not implemented"' failed.'
-		AND NOT ENABLE_SIMD) # Not compatible with SIMD due to error: 'unhandled unaligned load'
+	if (NOT ENABLE_MULTI_THREADING     # Not compatible with multi threading (atomic store not implemented)
+		AND NOT ENABLE_SIMD            # Not compatible with SIMD (unhandled unaligned load)
+		AND NOT BUILD_WASM_SIDECAR_ONLY)   # sidecar-only build emits just the .wasm sidecar
 		add_custom_command(
 			OUTPUT ${OUTPUT_BASE_NAME}.js
-			COMMAND emcc glue.o $<TARGET_FILE:Jolt> ${EMCC_JS_ARGS} -o ${OUTPUT_BASE_NAME}.js
-			DEPENDS jolt-bindings ${JOLT_FRONT_MATTER_FILE} ${JOLT_TARGETS} ${JOLT_IDL_FILE} ${JOLT_HEADER_FILE}
+			COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_JS_ARGS} -o ${OUTPUT_BASE_NAME}.js
+			DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_FILE} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 			COMMENT "Building JoltPhysics.js javascript"
 			VERBATIM)
 		add_custom_target(jolt-javascript ALL DEPENDS ${OUTPUT_BASE_NAME}.js)
@@ -261,19 +249,30 @@ if (NOT BUILD_WASM_COMPAT_ONLY)
 
 	add_custom_command(
 		OUTPUT ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm
-		COMMAND emcc glue.o $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
-		COMMAND ${REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm.js
-		DEPENDS jolt-bindings ${JOLT_FRONT_MATTER_FILE} ${JOLT_TARGETS} ${JOLT_IDL_FILE} ${JOLT_HEADER_FILE}
+		COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
+		DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_FILE} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 		COMMENT "Building JoltPhysics.js webassembly"
 		VERBATIM)
 	add_custom_target(jolt-wasm ALL DEPENDS ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm)
 endif()
 
+# multi-threaded.js references the worker module via a `replace_by_import(...)`
+# placeholder so a raw dynamic import() survives the emscripten/closure JS pipeline
+# (see JoltPhysics.js issue #245). Swap it back to a real `import` in the final bundle.
+# There is exactly one occurrence (the call), so a bare-word replace is safe.
+if (ENABLE_MULTI_THREADING)
+	set(FIXUP_IMPORT_COMMAND COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm-compat.js)
+else()
+	set(FIXUP_IMPORT_COMMAND "")
+endif()
+
+if (NOT BUILD_WASM_SIDECAR_ONLY)
 add_custom_command(
 	OUTPUT ${OUTPUT_BASE_NAME}.wasm-compat.js
-	COMMAND emcc glue.o $<TARGET_FILE:Jolt> ${EMCC_WASM_COMPAT_ARGS} -o ${OUTPUT_BASE_NAME}.wasm-compat.js
-	COMMAND ${REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm-compat.js
-	DEPENDS jolt-bindings ${JOLT_FRONT_MATTER_FILE} ${JOLT_TARGETS} ${JOLT_IDL_FILE} ${JOLT_HEADER_FILE}
+	COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_COMPAT_ARGS} -o ${OUTPUT_BASE_NAME}.wasm-compat.js
+	${FIXUP_IMPORT_COMMAND}
+	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_FILE} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 	COMMENT "Building JoltPhysics.js compat webassembly"
 	VERBATIM)
 add_custom_target(jolt-wasm-compat ALL DEPENDS ${OUTPUT_BASE_NAME}.wasm-compat.js)
+endif()

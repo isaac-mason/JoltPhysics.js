@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>JoltPhysics.js demo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link rel="stylesheet" type="text/css" href="style.css">
+	</head>
+	<body>
+		<div id="container">Loading...</div>
+		<div id="info">JoltPhysics.js cube heap demo<br/>
+		A heap of cubes continuously spawning and falling</div>
+
+		<script src="js/three/three.min.js"></script>
+		<script src="js/three/OrbitControls.js"></script>
+		<script src="js/three/WebGL.js"></script>
+		<script src="js/three/stats.min.js"></script>
+		<script src="js/three/dat.gui.min.js"></script>
+		<script src="js/example.js"></script>
+
+		<script type="module">
+			// In case you haven't built the library yourself, replace URL with: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
+			import initJolt from './js/jolt-physics.wasm-compat.js';
+
+			initJolt().then(function (Jolt) {
+				// Settings
+				var settings = {
+					numberOfCubes: 200,
+					spawnHeight: 10,
+					spawnArea: 2.5,
+					gravity: -50,
+					respawnPerFrame: 1
+				};
+
+				// Cube tracking
+				var cubes = [];
+				var cubeShape = null;
+
+				// Initialize this example
+				initExample(Jolt, onUpdate);
+
+				// Override gravity
+				physicsSystem.SetGravity(new Jolt.Vec3(0, settings.gravity, 0));
+
+				// Create a basic floor
+				createFloor();
+
+				// Create cube shape (reused for all cubes)
+				cubeShape = new Jolt.BoxShape(new Jolt.Vec3(0.25, 0.25, 0.25), 0.05, null);
+
+				// Helper function to generate random number in range
+				function randomInRange(min, max) {
+					return Math.random() * (max - min) + min;
+				}
+
+				// Spawn a single cube
+				function spawnCube() {
+					// Random position above the ground
+					var x = randomInRange(-settings.spawnArea, settings.spawnArea);
+					var y = randomInRange(0, settings.spawnHeight);
+					var z = randomInRange(-settings.spawnArea, settings.spawnArea);
+					var position = new Jolt.RVec3(x, y, z);
+
+					// Create body
+					var creationSettings = new Jolt.BodyCreationSettings(
+						cubeShape, 
+						position, 
+						Jolt.Quat.prototype.sIdentity(), 
+						Jolt.EMotionType_Dynamic, 
+						LAYER_MOVING
+					);
+					creationSettings.mRestitution = 0;
+					creationSettings.mFriction = 0.5;
+
+					var body = bodyInterface.CreateBody(creationSettings);
+					Jolt.destroy(creationSettings);
+					Jolt.destroy(position);
+
+					// Add to scene with random color
+					var colors = [0xff6b6b, 0x4ecdc4, 0x45b7d1, 0xf7b731, 0x5f27cd, 0x00d2d3, 0x1dd1a1, 0xee5a6f, 0xf368e0, 0xff9ff3];
+					var color = colors[Math.floor(Math.random() * colors.length)];
+					addToScene(body, color);
+
+					cubes.push(body);
+				}
+
+				// Update cube count
+				function updateCubeCount() {
+					var targetCount = settings.numberOfCubes;
+					var currentCount = cubes.length;
+
+					if (currentCount < targetCount) {
+						// Spawn more cubes
+						var toSpawn = targetCount - currentCount;
+						for (var i = 0; i < toSpawn; i++) {
+							spawnCube();
+						}
+					} else if (currentCount > targetCount) {
+						// Remove excess cubes
+						var toRemove = currentCount - targetCount;
+						for (var i = 0; i < toRemove; i++) {
+							var body = cubes.pop();
+							if (body) {
+								// Find and remove the three.js object
+								for (var j = 0; j < dynamicObjects.length; j++) {
+									if (dynamicObjects[j].userData.body === body) {
+										removeFromScene(dynamicObjects[j]);
+										break;
+									}
+								}
+							}
+						}
+					}
+				}
+
+				// Initial spawn
+				updateCubeCount();
+
+				// Create GUI
+				var gui = new dat.GUI();
+				gui.add(settings, 'numberOfCubes', 0, 1000, 1)
+					.name('Number of Cubes')
+					.onChange(updateCubeCount);
+				gui.add(settings, 'spawnHeight', 1, 30, 1).name('Spawn Height');
+				gui.add(settings, 'spawnArea', 0.5, 10, 0.5).name('Spawn Area');
+				gui.add(settings, 'gravity', -100, -1, 1)
+					.name('Gravity')
+					.onChange(function(value) {
+						physicsSystem.SetGravity(new Jolt.Vec3(0, value, 0));
+					});
+				gui.add(settings, 'respawnPerFrame', 0, 10, 1).name('Respawn Per Frame');
+
+				// Update function called every frame
+				function onUpdate(time, deltaTime) {
+					// Randomly reposition cubes to keep things dynamic
+					for (var i = 0; i < settings.respawnPerFrame && cubes.length > 0; i++) {
+						var randomIndex = Math.floor(Math.random() * cubes.length);
+						var cube = cubes[randomIndex];
+
+						// Reset position to random location
+						var x = 0//randomInRange(-settings.spawnArea, settings.spawnArea);
+						var y = randomInRange(0, settings.spawnHeight);
+						var z = 0//randomInRange(-settings.spawnArea, settings.spawnArea);
+						
+						bodyInterface.SetPositionAndRotation(
+							cube.GetID(),
+							new Jolt.RVec3(x, y, z),
+							Jolt.Quat.prototype.sIdentity(),
+							Jolt.EActivation_Activate
+						);
+
+						// Reset velocities
+						bodyInterface.SetLinearVelocity(cube.GetID(), new Jolt.Vec3(0, 0, 0));
+						bodyInterface.SetAngularVelocity(cube.GetID(), new Jolt.Vec3(0, 0, 0));
+					}
+				}
+			});
+
+		</script>
+	</body>
+</html>

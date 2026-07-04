@@ -5,161 +5,172 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
 	</head>
 	<body>
 		<div id="container">Loading...</div>
 		<div id="info">JoltPhysics.js falling shapes demo<br/>
 		This demo shows supported shape types</div>
 
-		<script src="js/three/three.min.js"></script>
-		<script src="js/three/OrbitControls.js"></script>
-		<script src="js/three/WebGL.js"></script>
-		<script src="js/three/stats.min.js"></script>
-		<script src="js/example.js"></script>
-
 		<script type="module">
-			// In case you haven't built the library yourself, replace URL with: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
-			import initJolt from './js/jolt-physics.wasm-compat.js';
+			// If you haven't built locally, swap for: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as THREE from 'three';
+			import * as Example from './js/example.js';
+			import { initExample, createFloor, createMeshFloor, addToScene, getRandomQuat, DegreesToRadians, LAYER_MOVING } from './js/example.js';
 
-			initJolt().then(function (Jolt) {
-				// Spawning variables
-				var objectTimePeriod = 0.25;
-				var timeNextSpawn = time + objectTimePeriod;
-				var maxNumObjects = 100;
+			const Jolt = await initJolt();
 
-				// Initialize this example
-				initExample(Jolt, onUpdate);
+			// Spawning variables
+			var objectTimePeriod = 0.25;
+			var timeNextSpawn = Example.time + objectTimePeriod;
+			var maxNumObjects = 100;
 
-				// Create a basic floor
-				createFloor();
+			// Initialize this example
+			initExample(Jolt, onUpdate);
+			const bodyInterface = Example.bodyInterface;
 
-				// Create example mesh
-				createMeshFloor(30, 1, 4, 0, 5, 0);
+			// Create a basic floor
+			createFloor();
 
-				function generateObject() {
+			// Create example mesh
+			createMeshFloor(30, 1, 4, 0, 5, 0);
 
-					let numTypes = 10;
-					let objectType = Math.ceil(Math.random() * numTypes);
+			const quatAxisAngle = (x, y, z, angle) => {
+				const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(x, y, z), angle);
+				return [q.x, q.y, q.z, q.w];
+			};
 
-					let shape = null;
+			function generateObject() {
 
-					let colors = [0xff0000, 0xd9b1a3, 0x4d4139, 0xccad33, 0xf2ff40, 0x00ff00, 0x165943, 0x567371, 0x80d5ff, 0x69778c, 0xbeb6f2, 0x7159b3, 0x73004d, 0xd90074, 0xff8091, 0xbf3030, 0x592400, 0xa66c29, 0xb3aa86, 0x296600, 0x00e600, 0x66ccaa, 0x00eeff, 0x3d9df2, 0x000e33, 0x3d00e6, 0xb300a7, 0xff80d5, 0x330d17, 0x59332d, 0xff8c40, 0x33210d, 0x403c00, 0x89d96c, 0x0d3312, 0x0d3330, 0x005c73, 0x0066ff, 0x334166, 0x1b0066, 0x4d3949, 0xbf8faf, 0x59000c, 0x0000ff]
+				let numTypes = 10;
+				let objectType = Math.ceil(Math.random() * numTypes);
 
-					switch (objectType) {
-						case 1: {
-							// Sphere
-							let radius = 0.5 + Math.random();
-							shape = new Jolt.SphereShape(radius, null);
-							break;
-						}
+				let shape = null;
 
-						case 2: {
-							// Box
-							let sx = 1 + Math.random();
-							let sy = 1 + Math.random();
-							let sz = 1 + Math.random();
-							shape = new Jolt.BoxShape(new Jolt.Vec3(sx * 0.5, sy * 0.5, sz * 0.5), 0.05, null);
-							break;
-						}
+				let colors = [0xff0000, 0xd9b1a3, 0x4d4139, 0xccad33, 0xf2ff40, 0x00ff00, 0x165943, 0x567371, 0x80d5ff, 0x69778c, 0xbeb6f2, 0x7159b3, 0x73004d, 0xd90074, 0xff8091, 0xbf3030, 0x592400, 0xa66c29, 0xb3aa86, 0x296600, 0x00e600, 0x66ccaa, 0x00eeff, 0x3d9df2, 0x000e33, 0x3d00e6, 0xb300a7, 0xff80d5, 0x330d17, 0x59332d, 0xff8c40, 0x33210d, 0x403c00, 0x89d96c, 0x0d3312, 0x0d3330, 0x005c73, 0x0066ff, 0x334166, 0x1b0066, 0x4d3949, 0xbf8faf, 0x59000c, 0x0000ff]
 
-						case 3: {
-							// Cylinder
-							let radius = 0.5 + Math.random();
-							let halfHeight = 0.5 + 0.5 * Math.random();
-							shape = new Jolt.CylinderShape(halfHeight, radius, 0.05, null);
-							break;
-						}
-
-						case 4: {
-							// Tapered cylinder
-							let topRadius = 0.1 + Math.random();
-							let bottomRadius = 0.5 + Math.random();
-							let halfHeight = 0.5 * (topRadius + bottomRadius + Math.random());
-							shape = new Jolt.TaperedCylinderShapeSettings(halfHeight, topRadius, bottomRadius, null).Create().Get();
-							break;
-						}
-
-						case 5: {
-							// Capsule
-							let radius = 0.5 + Math.random();
-							let halfHeight = 0.5 + 0.5 * Math.random();
-							shape = new Jolt.CapsuleShape(halfHeight, radius, null);
-							break;
-						}
-
-						case 6: {
-							// Tapered capsule
-							let topRadius = 0.1 + Math.random();
-							let bottomRadius = 0.5 + Math.random();
-							let halfHeight = 0.5 * (topRadius + bottomRadius + Math.random());
-							shape = new Jolt.TaperedCapsuleShapeSettings(halfHeight, topRadius, bottomRadius, null).Create().Get();
-							break;
-						}
-
-						case 7: {
-							// Convex hull
-							let hull = new Jolt.ConvexHullShapeSettings;
-							for (let p = 0; p < 10; ++p)
-								hull.mPoints.push_back(new Jolt.Vec3(-0.5 + 2 * Math.random(), -0.5 + 2 * Math.random(), -0.5 + 2 * Math.random()));
-							shape = hull.Create().Get();
-							break;
-						}
-
-						case 8: {
-							// Static compound shape
-							let shapeSettings = new Jolt.StaticCompoundShapeSettings();
-							let l = 1.0 + Math.random();
-							let r2 = 0.5 + 0.5 * Math.random();
-							let r1 = 0.5 * r2;
-							shapeSettings.AddShape(new Jolt.Vec3(-l, 0, 0), Jolt.Quat.prototype.sIdentity(), new Jolt.SphereShapeSettings(r2));
-							shapeSettings.AddShape(new Jolt.Vec3(l, 0, 0), Jolt.Quat.prototype.sIdentity(), new Jolt.SphereShapeSettings(r2));
-							shapeSettings.AddShape(new Jolt.Vec3(0, 0, 0), Jolt.Quat.prototype.sRotation(new Jolt.Vec3(0, 0, 1), 0.5 * Math.PI), new Jolt.CapsuleShapeSettings(l, r1));
-							shape = shapeSettings.Create().Get();
-							break;
-						}
-
-						case 9: {
-							// Mutable compound shape
-							let shapeSettings = new Jolt.MutableCompoundShapeSettings();
-							let l = 1.0 + Math.random();
-							let r2 = 0.5 + 0.5 * Math.random();
-							let r1 = 0.5 * r2;
-							shapeSettings.AddShape(new Jolt.Vec3(-l, 0, 0), Jolt.Quat.prototype.sIdentity(), new Jolt.SphereShapeSettings(r2));
-							shapeSettings.AddShape(new Jolt.Vec3(l, 0, 0), Jolt.Quat.prototype.sIdentity(), new Jolt.BoxShapeSettings(Jolt.Vec3.prototype.sReplicate(r2)));
-							shapeSettings.AddShape(new Jolt.Vec3(0, 0, 0), Jolt.Quat.prototype.sRotation(new Jolt.Vec3(0, 0, 1), 0.5 * Math.PI), new Jolt.CapsuleShapeSettings(l, r1));
-							shape = shapeSettings.Create().Get();
-							break;
-						}
-
-						case 10: {
-							// Sphere with COM offset
-							let radius = 0.5;
-							shape = new Jolt.OffsetCenterOfMassShapeSettings(new Jolt.Vec3(0, -0.1 * radius, 0), new Jolt.SphereShapeSettings(radius, null)).Create().Get();
-							break;
-						}
+				switch (objectType) {
+					case 1: {
+						// Sphere
+						let radius = 0.5 + Math.random();
+						shape = new Jolt.SphereShape(radius);
+						break;
 					}
 
-					// Position and rotate body
-					let pos = new Jolt.RVec3((Math.random() - 0.5) * 25, 15, (Math.random() - 0.5) * 25);
-					let rot = getRandomQuat();
+					case 2: {
+						// Box
+						let sx = 1 + Math.random();
+						let sy = 1 + Math.random();
+						let sz = 1 + Math.random();
+						shape = new Jolt.BoxShape([sx * 0.5, sy * 0.5, sz * 0.5]);
+						break;
+					}
 
-					// Create physics body
-					let creationSettings = new Jolt.BodyCreationSettings(shape, pos, rot, Jolt.EMotionType_Dynamic, LAYER_MOVING);
-					creationSettings.mRestitution = 0.5;
-					let body = bodyInterface.CreateBody(creationSettings);
+					case 3: {
+						// Cylinder
+						let radius = 0.5 + Math.random();
+						let halfHeight = 0.5 + 0.5 * Math.random();
+						shape = new Jolt.CylinderShape(halfHeight, radius);
+						break;
+					}
 
-					addToScene(body, colors[objectType - 1]);
-				}
+					case 4: {
+						// Tapered cylinder
+						let topRadius = 0.1 + Math.random();
+						let bottomRadius = 0.5 + Math.random();
+						let halfHeight = 0.5 * (topRadius + bottomRadius + Math.random());
+						shape = new Jolt.TaperedCylinderShapeSettings(halfHeight, topRadius, bottomRadius).Create().Get();
+						break;
+					}
 
-				function onUpdate(time, deltaTime) {
-					// Check if its time to spawn a new object
-					if (dynamicObjects.length < maxNumObjects && time > timeNextSpawn) {
-						generateObject();
-						timeNextSpawn = time + objectTimePeriod;
+					case 5: {
+						// Capsule
+						let radius = 0.5 + Math.random();
+						let halfHeight = 0.5 + 0.5 * Math.random();
+						shape = new Jolt.CapsuleShape(halfHeight, radius);
+						break;
+					}
+
+					case 6: {
+						// Tapered capsule
+						let topRadius = 0.1 + Math.random();
+						let bottomRadius = 0.5 + Math.random();
+						let halfHeight = 0.5 * (topRadius + bottomRadius + Math.random());
+						shape = new Jolt.TaperedCapsuleShapeSettings(halfHeight, topRadius, bottomRadius).Create().Get();
+						break;
+					}
+
+					case 7: {
+						// Convex hull
+						const points = new Jolt.ArrayVec3();
+						for (let p = 0; p < 10; ++p)
+							points.push_back([-0.5 + 2 * Math.random(), -0.5 + 2 * Math.random(), -0.5 + 2 * Math.random()]);
+						shape = new Jolt.ConvexHullShapeSettings(points).Create().Get();
+						points.delete();
+						break;
+					}
+
+					case 8: {
+						// Static compound shape
+						let shapeSettings = new Jolt.StaticCompoundShapeSettings();
+						let l = 1.0 + Math.random();
+						let r2 = 0.5 + 0.5 * Math.random();
+						let r1 = 0.5 * r2;
+						shapeSettings.AddShape([-l, 0, 0], [0, 0, 0, 1], new Jolt.SphereShape(r2));
+						shapeSettings.AddShape([l, 0, 0], [0, 0, 0, 1], new Jolt.SphereShape(r2));
+						shapeSettings.AddShape([0, 0, 0], quatAxisAngle(0, 0, 1, 0.5 * Math.PI), new Jolt.CapsuleShape(l, r1));
+						shape = shapeSettings.Create().Get();
+						break;
+					}
+
+					case 9: {
+						// Mutable compound shape
+						let shapeSettings = new Jolt.MutableCompoundShapeSettings();
+						let l = 1.0 + Math.random();
+						let r2 = 0.5 + 0.5 * Math.random();
+						let r1 = 0.5 * r2;
+						shapeSettings.AddShape([-l, 0, 0], [0, 0, 0, 1], new Jolt.SphereShape(r2));
+						shapeSettings.AddShape([l, 0, 0], [0, 0, 0, 1], new Jolt.BoxShape([r2, r2, r2]));
+						shapeSettings.AddShape([0, 0, 0], quatAxisAngle(0, 0, 1, 0.5 * Math.PI), new Jolt.CapsuleShape(l, r1));
+						shape = shapeSettings.Create().Get();
+						break;
+					}
+
+					case 10: {
+						// Sphere with COM offset
+						let radius = 0.5;
+						shape = new Jolt.OffsetCenterOfMassShapeSettings([0, -0.1 * radius, 0], new Jolt.SphereShape(radius)).Create().Get();
+						break;
 					}
 				}
-			});
 
+				// Position and rotate body
+				let pos = [(Math.random() - 0.5) * 25, 15, (Math.random() - 0.5) * 25];
+				let rot = getRandomQuat();
+
+				// Create physics body
+				let creationSettings = new Jolt.BodyCreationSettings(shape, pos, rot, Jolt.EMotionType.Dynamic, LAYER_MOVING);
+				creationSettings.mRestitution = 0.5;
+				let body = bodyInterface.CreateBody(creationSettings);
+
+				addToScene(body, colors[objectType - 1]);
+			}
+
+			function onUpdate(time, deltaTime) {
+				// Check if its time to spawn a new object
+				if (Example.dynamicObjects.length < maxNumObjects && time > timeNextSpawn) {
+					generateObject();
+					timeNextSpawn = time + objectTimePeriod;
+				}
+			}
 		</script>
 	</body>
 </html>
