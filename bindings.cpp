@@ -3929,7 +3929,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
         .property("mLateralFriction", &WheelSettingsTV::mLateralFriction);
 
     jolt_class_<Wheel>("Wheel")
-        .function("GetSettings", +[](Wheel &w) { return w.GetSettings(); }, allow_raw_pointers())
+        .function("GetSettings", +[](Wheel &w) { return const_cast<WheelSettings *>(w.GetSettings()); }, allow_raw_pointers())
         .function("HasContact", &Wheel::HasContact)
         .function("GetRotationAngle", &Wheel::GetRotationAngle)
         .function("GetSteerAngle", &Wheel::GetSteerAngle)
