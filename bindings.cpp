@@ -1526,7 +1526,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
     // -- Decorated base --
     jolt_class_<DecoratedShape, base<Shape>>("DecoratedShape")   // abstract
         .smart_ptr<Ref<DecoratedShape>>("DecoratedShapeRef")
-        .function("GetInnerShape", &DecoratedShape::GetInnerShape, allow_raw_pointers());
+        .function("GetInnerShape", +[](const DecoratedShape &s) { return const_cast<Shape *>(s.GetInnerShape()); }, allow_raw_pointers());
     jolt_class_<DecoratedShapeSettings, base<ShapeSettings>>("DecoratedShapeSettings")   // abstract
         .smart_ptr<Ref<DecoratedShapeSettings>>("DecoratedShapeSettingsRef");
 
@@ -3543,7 +3543,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
         .function("SetUp(up)", &CharacterBase::SetUp)
         .out_function("GetUp(out)", out_desc::Vec3, +[](const CharacterBase &s, uintptr_t out) { WriteVec3(s.GetUp(), out); })
         .function("IsSlopeTooSteep(normal)", &CharacterBase::IsSlopeTooSteep)
-        .function("GetShape", &CharacterBase::GetShape, allow_raw_pointers())
+        .function("GetShape", +[](const CharacterBase &c) { return const_cast<Shape *>(c.GetShape()); }, allow_raw_pointers())
         .function("GetGroundState", &CharacterBase::GetGroundState)
         .function("IsSupported", &CharacterBase::IsSupported)
         .out_function("GetGroundPosition(out)", out_desc::Vec3, +[](const CharacterBase &s, uintptr_t out) { WriteVec3(s.GetGroundPosition(), out); })   // RVec3 == Vec3 (single precision)
