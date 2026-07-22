@@ -116,11 +116,27 @@ export interface ContactBuffer {
   getRemoved(out: RemovedContact, index: number): RemovedContact;
   destroy(): void;
 }
+export type ActiveBodyState = {
+  id: number;
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+  linVel: [number, number, number];
+  angVel: [number, number, number];
+};
+/** Bulk active-body state — one refresh packs all active bodies' pose+velocity into the WASM heap for zero-crossing reads (see ActiveBodyBuffer). */
+export interface ActiveBodyBufferHandle {
+  readonly bodyCount: number;
+}
 export interface JoltFacade {
   createContactBuffer(physicsSystem: PhysicsSystem): ContactBuffer;
   createContact(): Contact;
   createContactPoint(): ContactPoint;
   createRemovedContact(): RemovedContact;
+  createActiveBodyBuffer(physicsSystem: PhysicsSystem): ActiveBodyBufferHandle;
+  updateActiveBodyBuffer(buffer: ActiveBodyBufferHandle): void;
+  getActiveBodyBufferStateAt(buffer: ActiveBodyBufferHandle, out: ActiveBodyState, index: number): ActiveBodyState;
+  createActiveBodyState(): ActiveBodyState;
+  destroyActiveBodyBuffer(buffer: ActiveBodyBufferHandle): void;
 }
 `;
 function injectFacadeTypes(src) {

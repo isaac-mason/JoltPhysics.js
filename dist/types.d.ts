@@ -2516,80 +2516,6 @@ export interface VehicleConstraint extends Constraint {
   GetMaxPitchRollAngle(): number;
 }
 
-export interface ECullModeValue<T extends number> {
-  value: T;
-}
-export type ECullMode = ECullModeValue<0>|ECullModeValue<1>|ECullModeValue<2>;
-
-export interface ECastShadowValue<T extends number> {
-  value: T;
-}
-export type ECastShadow = ECastShadowValue<0>|ECastShadowValue<1>;
-
-export interface EDrawModeValue<T extends number> {
-  value: T;
-}
-export type EDrawMode = EDrawModeValue<0>|EDrawModeValue<1>;
-
-export interface EShapeColorValue<T extends number> {
-  value: T;
-}
-export type EShapeColor = EShapeColorValue<0>|EShapeColorValue<1>|EShapeColorValue<2>|EShapeColorValue<3>|EShapeColorValue<4>|EShapeColorValue<5>;
-
-export interface ESoftBodyConstraintColorValue<T extends number> {
-  value: T;
-}
-export type ESoftBodyConstraintColor = ESoftBodyConstraintColorValue<0>|ESoftBodyConstraintColorValue<1>|ESoftBodyConstraintColorValue<2>;
-
-export interface BodyManagerDrawSettings extends ClassHandle {
-  mDrawShapeColor: EShapeColor;
-  mDrawSoftBodyConstraintColor: ESoftBodyConstraintColor;
-  mDrawGetSupportFunction: boolean;
-  mDrawSupportDirection: boolean;
-  mDrawGetSupportingFace: boolean;
-  mDrawShape: boolean;
-  mDrawShapeWireframe: boolean;
-  mDrawBoundingBox: boolean;
-  mDrawCenterOfMassTransform: boolean;
-  mDrawWorldTransform: boolean;
-  mDrawVelocity: boolean;
-  mDrawMassAndInertia: boolean;
-  mDrawSleepStats: boolean;
-  mDrawSoftBodyVertices: boolean;
-  mDrawSoftBodyVertexVelocities: boolean;
-  mDrawSoftBodyEdgeConstraints: boolean;
-  mDrawSoftBodyBendConstraints: boolean;
-  mDrawSoftBodyVolumeConstraints: boolean;
-  mDrawSoftBodySkinConstraints: boolean;
-  mDrawSoftBodyLRAConstraints: boolean;
-  mDrawSoftBodyRods: boolean;
-  mDrawSoftBodyRodStates: boolean;
-  mDrawSoftBodyRodBendTwistConstraints: boolean;
-  mDrawSoftBodyPredictedBounds: boolean;
-}
-
-export interface DebugRendererVertexTraits extends ClassHandle {
-}
-
-export interface DebugRendererTriangleTraits extends ClassHandle {
-}
-
-export interface DebugRendererEm extends ClassHandle {
-  Initialize(): void;
-  DrawBodies(system: PhysicsSystem | null, settings: BodyManagerDrawSettings | null): void;
-  DrawBodies(system: PhysicsSystem | null): void;
-  DrawConstraints(system: PhysicsSystem | null): void;
-  DrawConstraintLimits(system: PhysicsSystem | null): void;
-  DrawConstraintReferenceFrame(system: PhysicsSystem | null): void;
-  DrawConstraint(constraint: Constraint | null): void;
-  DrawBody(body: Body | null, color: Color, wireframe: boolean): void;
-  DrawShape(shape: Shape | null, modelMatrix: Mat44, scale: Vec3, color: Color, wireframe: boolean): void;
-}
-
-export interface DebugRendererWrapper extends DebugRendererEm {
-  notifyOnDestruction(): void;
-}
-
 export type Color = [ r: number, g: number, b: number, a: number ];
 
 export type Vec3 = [ x: number, y: number, z: number ];
@@ -3283,29 +3209,6 @@ interface EmbindModule {
   VehicleConstraint: {
     new(body: Body, settings: VehicleConstraintSettings): VehicleConstraint;
   };
-  ECullMode: {CullBackFace: ECullModeValue<0>, CullFrontFace: ECullModeValue<1>, Off: ECullModeValue<2>};
-  ECastShadow: {On: ECastShadowValue<0>, Off: ECastShadowValue<1>};
-  EDrawMode: {Solid: EDrawModeValue<0>, Wireframe: EDrawModeValue<1>};
-  EShapeColor: {InstanceColor: EShapeColorValue<0>, ShapeTypeColor: EShapeColorValue<1>, MotionTypeColor: EShapeColorValue<2>, SleepColor: EShapeColorValue<3>, IslandColor: EShapeColorValue<4>, MaterialColor: EShapeColorValue<5>};
-  ESoftBodyConstraintColor: {ConstraintType: ESoftBodyConstraintColorValue<0>, ConstraintGroup: ESoftBodyConstraintColorValue<1>, ConstraintOrder: ESoftBodyConstraintColorValue<2>};
-  BodyManagerDrawSettings: {
-    new(): BodyManagerDrawSettings;
-  };
-  DebugRendererVertexTraits: {
-    mPositionOffset(): number;
-    mNormalOffset(): number;
-    mUVOffset(): number;
-    mSize(): number;
-  };
-  DebugRendererTriangleTraits: {
-    mVOffset(): number;
-    mSize(): number;
-  };
-  DebugRendererEm: {
-    implement(obj: any): DebugRendererWrapper;
-    extend(name: EmbindString, obj: any): any;
-  };
-  DebugRendererWrapper: {};
   addVehicleStepListener(_0: PhysicsSystem | null, _1: VehicleConstraint | null): void;
   _getOutScratch(): number;
   getContactBodyID(_0: number): number;
@@ -3337,11 +3240,27 @@ export interface ContactBuffer {
   getRemoved(out: RemovedContact, index: number): RemovedContact;
   destroy(): void;
 }
+export type ActiveBodyState = {
+  id: number;
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+  linVel: [number, number, number];
+  angVel: [number, number, number];
+};
+/** Bulk active-body state — one refresh packs all active bodies' pose+velocity into the WASM heap for zero-crossing reads (see ActiveBodyBuffer). */
+export interface ActiveBodyBufferHandle {
+  readonly bodyCount: number;
+}
 export interface JoltFacade {
   createContactBuffer(physicsSystem: PhysicsSystem): ContactBuffer;
   createContact(): Contact;
   createContactPoint(): ContactPoint;
   createRemovedContact(): RemovedContact;
+  createActiveBodyBuffer(physicsSystem: PhysicsSystem): ActiveBodyBufferHandle;
+  updateActiveBodyBuffer(buffer: ActiveBodyBufferHandle): void;
+  getActiveBodyBufferStateAt(buffer: ActiveBodyBufferHandle, out: ActiveBodyState, index: number): ActiveBodyState;
+  createActiveBodyState(): ActiveBodyState;
+  destroyActiveBodyBuffer(buffer: ActiveBodyBufferHandle): void;
 }
 
 export type JoltModule = WasmModule & EmbindModule & JoltFacade;
