@@ -5527,8 +5527,8 @@ if (ENVIRONMENT_IS_PTHREAD) {
   // can rename both definition and call site consistently.
 
   function createContactBuffer(physicsSystem) {
-    const impl = new Module.ContactListenerBuffer();
-    physicsSystem.SetContactListener(impl);
+    const impl = new Module['ContactListenerBuffer']();
+    physicsSystem['SetContactListener'](impl);
     return {
       '_impl': impl,
       'addedCount': 0, 'persistedCount': 0, 'removedCount': 0,
@@ -5542,21 +5542,23 @@ if (ENVIRONMENT_IS_PTHREAD) {
   }
 
   function clearContactBuffer(buf) {
-    buf['_impl'].Clear();
+    buf['_impl']['Clear']();
     buf['addedCount'] = buf['persistedCount'] = buf['removedCount'] = 0;
   }
 
   function updateContactBuffer(buf) {
+    // Bracket notation: embind method names are runtime string keys closure
+    // can't rename (see updateActiveBodyBuffer).
     const impl = buf['_impl'];
-    buf['addedCount']     = impl.GetAddedCount();
-    buf['persistedCount'] = impl.GetPersistedCount();
-    buf['removedCount']   = impl.GetRemovedCount();
-    buf._addedI32     = Module.HEAP32;  buf._addedI32Base     = impl.AddedI32Ptr()     >>> 2;
-    buf._addedF32     = Module.HEAPF32; buf._addedF32Base     = impl.AddedF32Ptr()     >>> 2;
-    buf._persistedI32 = Module.HEAP32;  buf._persistedI32Base = impl.PersistedI32Ptr() >>> 2;
-    buf._persistedF32 = Module.HEAPF32; buf._persistedF32Base = impl.PersistedF32Ptr() >>> 2;
-    buf._pointsF32    = Module.HEAPF32; buf._pointsF32Base    = impl.PointsF32Ptr()    >>> 2;
-    buf._removedI32   = Module.HEAP32;  buf._removedI32Base   = impl.RemovedI32Ptr()   >>> 2;
+    buf['addedCount']     = impl['GetAddedCount']();
+    buf['persistedCount'] = impl['GetPersistedCount']();
+    buf['removedCount']   = impl['GetRemovedCount']();
+    buf._addedI32     = Module['HEAP32'];  buf._addedI32Base     = impl['AddedI32Ptr']()     >>> 2;
+    buf._addedF32     = Module['HEAPF32']; buf._addedF32Base     = impl['AddedF32Ptr']()     >>> 2;
+    buf._persistedI32 = Module['HEAP32'];  buf._persistedI32Base = impl['PersistedI32Ptr']() >>> 2;
+    buf._persistedF32 = Module['HEAPF32']; buf._persistedF32Base = impl['PersistedF32Ptr']() >>> 2;
+    buf._pointsF32    = Module['HEAPF32']; buf._pointsF32Base    = impl['PointsF32Ptr']()    >>> 2;
+    buf._removedI32   = Module['HEAP32'];  buf._removedI32Base   = impl['RemovedI32Ptr']()   >>> 2;
   }
 
   function _readContact(i32, i32Base, f32, f32Base, buf, out, i) {
@@ -5602,13 +5604,13 @@ if (ENVIRONMENT_IS_PTHREAD) {
     return out;
   }
 
-  function destroyContactBuffer(buf) { buf['_impl'].delete(); }
+  function destroyContactBuffer(buf) { buf['_impl']['delete'](); }
 
   // ---- active body buffer ----
 
   function createActiveBodyBuffer(physicsSystem) {
     return {
-      '_impl': new Module.ActiveBodyBuffer(),
+      '_impl': new Module['ActiveBodyBuffer'](),
       '_sys':  physicsSystem,
       'bodyCount': 0,
       _f32: null, _f32Base: 0, _u32: null,
@@ -5616,12 +5618,14 @@ if (ENVIRONMENT_IS_PTHREAD) {
   }
 
   function updateActiveBodyBuffer(buf) {
-    buf['_impl'].Refresh(buf['_sys']);
-    buf['bodyCount'] = buf['_impl'].GetBodyCount();
-    const base   = buf['_impl'].BodiesF32Ptr();
+    // Embind method names are runtime string keys closure can't rename, so call
+    // them via bracket notation (dot-access would be renamed and mismatch).
+    buf['_impl']['Refresh'](buf['_sys']);
+    buf['bodyCount'] = buf['_impl']['GetBodyCount']();
+    const base   = buf['_impl']['BodiesF32Ptr']();
     buf._f32Base = base >>> 2;
-    buf._f32     = Module.HEAPF32;
-    buf._u32     = Module.HEAPU32;
+    buf._f32     = Module['HEAPF32'];
+    buf._u32     = Module['HEAPU32'];
   }
 
   function getActiveBodyBufferStateAt(buf, out, i) {
@@ -5636,7 +5640,7 @@ if (ENVIRONMENT_IS_PTHREAD) {
     return out;
   }
 
-  function destroyActiveBodyBuffer(buf) { buf['_impl'].delete(); }
+  function destroyActiveBodyBuffer(buf) { buf['_impl']['delete'](); }
 
   // ---- out-param object factories ----
 
