@@ -19,10 +19,14 @@
 			const logEl = document.getElementById('log');
 			const log = (msg) => { console.log(msg); logEl.textContent += msg + '\n'; };
 
-			// Under embind, objects returned by `new Jolt.X()` / factories are JS handles
-			// wrapping C++ memory. Value handles must be .delete()d; Ref-counted objects
-			// (shapes, materials, settings) are freed automatically when the last reference
-			// goes away. Vec3/Quat/Mat4 are plain JS arrays here — nothing to clean up.
+			// Under embind, EVERY object returned by `new Jolt.X()` / factories is a JS handle
+			// that must be .delete()d — including refcounted ones (shapes, materials, settings).
+			// A refcounted handle is itself a strong reference: .delete() releases that one
+			// reference, and the C++ object is freed once the LAST reference (a C++ owner or
+			// another JS handle) goes away. So it is always safe to delete a handle you created,
+			// even if something else still holds the object alive. The only handles you must NOT
+			// delete are those explicitly transferred to C++ ownership (see the JoltInterface
+			// interfaces below). Vec3/Quat/Mat4 are plain JS arrays here — nothing to clean up.
 
 			// Record how much heap we have to start with
 			const memoryFreeBefore = Jolt.JoltInterface.sGetFreeMemory();
@@ -53,7 +57,7 @@
 			const material = new Jolt.PhysicsMaterial();
 			const box = new Jolt.BoxShapeSettings([4, 0.5, 0.5]);
 			box.mConvexRadius = 0.05;
-			box.SetMaterial(material);                               // 'material' is now owned by 'box' (refcounted)
+			box.SetMaterial(material);                               // 'box' adds its own reference to 'material'
 			const boxResult = box.Create();
 			const boxShape = boxResult.Get();                        // compound AddShape takes a built Shape
 			const compound = new Jolt.StaticCompoundShapeSettings();
@@ -76,14 +80,17 @@
 			bodyInterface.RemoveBody(body.GetID());
 			bodyInterface.DestroyBody(body.GetID());
 
-			// Release the handles we still own. 'material' is NOT deleted here — it is owned
-			// by the shape chain and freed once the last shape reference is released.
+			// Release every handle we created. Each is a reference; deleting them drops those
+			// references and the refcounted C++ objects are freed once nothing holds them.
+			// 'material' MUST be deleted too — its handle is an independent reference, so leaving
+			// it undeleted pins the PhysicsMaterial alive (the 48-byte leak this demo used to show).
 			shapeResult.delete();
 			shape.delete();
 			compound.delete();
 			boxResult.delete();
 			boxShape.delete();
 			box.delete();
+			material.delete();
 			jolt.delete();                                          // tears down the physics system + owned interfaces
 
 			// A correct teardown reclaims everything: this should report 0 bytes.
