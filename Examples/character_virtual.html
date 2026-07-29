@@ -140,7 +140,7 @@
 			OnContactSolve: (character, bodyID2, subShapeID2, contactPosition, contactNormal, contactVelocity, characterVelocity, newCharacterVelocity) => {
 				const contactVel = new THREE.Vector3(contactVelocity[0], contactVelocity[1], contactVelocity[2]);
 				if (!allowSliding && contactVel.lengthSq() < 1.0e-12 && !character.IsSlopeTooSteep(contactNormal))
-					return [0, 0, 0];
+					return { velocity: [0, 0, 0] };
 			},
 		});
 

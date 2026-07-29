@@ -3160,7 +3160,7 @@ interface EmbindModule {
   };
   CharacterContactSettings: {};
   CharacterContactListener: {
-    implement(obj: any): CharacterContactListenerWrapper;
+    implement(obj: CharacterContactListenerCallbacks): CharacterContactListenerWrapper;
     extend(name: EmbindString, obj: any): any;
   };
   CharacterContactListenerWrapper: {};
@@ -3313,6 +3313,28 @@ interface EmbindModule {
   setContactRelativeLinearSurfaceVelocity(_0: number, _1: Vec3): void;
   setContactRelativeAngularSurfaceVelocity(_0: number, _1: Vec3): void;
   cNoCollisionValue: number;
+}
+
+
+/** Return from a *ContactSolve callback to override the resolved character velocity; omit (or return nothing) to keep Jolt's. */
+export type CharacterVelocityOverride = { velocity?: Vec3 };
+/** Return from OnAdjustBodyVelocity to override the contacting body's velocity; omit a field to keep it. */
+export type AdjustedBodyVelocity = { linear?: Vec3; angular?: Vec3 };
+/** Shape of the object passed to `CharacterContactListener.implement(...)`. Every callback is optional.
+ * bodyID2 / subShapeID2 / otherCharacterID are numeric ids; ioSettings is mutated in place (a real
+ * handle), whereas velocity overrides are returned (see CharacterVelocityOverride / AdjustedBodyVelocity). */
+export interface CharacterContactListenerCallbacks {
+  OnContactValidate?(character: CharacterVirtual, bodyID2: number, subShapeID2: number): boolean;
+  OnContactAdded?(character: CharacterVirtual, bodyID2: number, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnContactPersisted?(character: CharacterVirtual, bodyID2: number, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnContactRemoved?(character: CharacterVirtual, bodyID2: number, subShapeID2: number): void;
+  OnAdjustBodyVelocity?(character: CharacterVirtual, body2: Body, linearVelocity: Vec3, angularVelocity: Vec3): AdjustedBodyVelocity | void;
+  OnContactSolve?(character: CharacterVirtual, bodyID2: number, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, contactVelocity: Vec3, characterVelocity: Vec3, newCharacterVelocity: Vec3): CharacterVelocityOverride | void;
+  OnCharacterContactValidate?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number): boolean;
+  OnCharacterContactAdded?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnCharacterContactPersisted?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnCharacterContactRemoved?(character: CharacterVirtual, otherCharacterID: number, subShapeID2: number): void;
+  OnCharacterContactSolve?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, contactVelocity: Vec3, characterVelocity: Vec3, newCharacterVelocity: Vec3): CharacterVelocityOverride | void;
 }
 
 

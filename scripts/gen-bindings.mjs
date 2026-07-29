@@ -175,6 +175,40 @@ export interface JoltFacade {
   destroyActiveBodyBuffer(buffer: ActiveBodyBufferHandle): void;
 }
 `;
+
+// The CharacterContactListener callbacks can't mutate their Vec3& out-params from JS (Vec3 is a
+// value_array — passed by copy), so a callback overrides an output by RETURNING an object naming
+// what to change. These types document that contract, which embind's `implement(obj: any)` hides.
+const CHARACTER_LISTENER_TYPES = `
+/** Return from a *ContactSolve callback to override the resolved character velocity; omit (or return nothing) to keep Jolt's. */
+export type CharacterVelocityOverride = { velocity?: Vec3 };
+/** Return from OnAdjustBodyVelocity to override the contacting body's velocity; omit a field to keep it. */
+export type AdjustedBodyVelocity = { linear?: Vec3; angular?: Vec3 };
+/** Shape of the object passed to \`CharacterContactListener.implement(...)\`. Every callback is optional.
+ * bodyID2 / subShapeID2 / otherCharacterID are numeric ids; ioSettings is mutated in place (a real
+ * handle), whereas velocity overrides are returned (see CharacterVelocityOverride / AdjustedBodyVelocity). */
+export interface CharacterContactListenerCallbacks {
+  OnContactValidate?(character: CharacterVirtual, bodyID2: number, subShapeID2: number): boolean;
+  OnContactAdded?(character: CharacterVirtual, bodyID2: number, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnContactPersisted?(character: CharacterVirtual, bodyID2: number, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnContactRemoved?(character: CharacterVirtual, bodyID2: number, subShapeID2: number): void;
+  OnAdjustBodyVelocity?(character: CharacterVirtual, body2: Body, linearVelocity: Vec3, angularVelocity: Vec3): AdjustedBodyVelocity | void;
+  OnContactSolve?(character: CharacterVirtual, bodyID2: number, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, contactVelocity: Vec3, characterVelocity: Vec3, newCharacterVelocity: Vec3): CharacterVelocityOverride | void;
+  OnCharacterContactValidate?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number): boolean;
+  OnCharacterContactAdded?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnCharacterContactPersisted?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, ioSettings: CharacterContactSettings): void;
+  OnCharacterContactRemoved?(character: CharacterVirtual, otherCharacterID: number, subShapeID2: number): void;
+  OnCharacterContactSolve?(character: CharacterVirtual, otherCharacter: CharacterVirtual, subShapeID2: number, contactPosition: Vec3, contactNormal: Vec3, contactVelocity: Vec3, characterVelocity: Vec3, newCharacterVelocity: Vec3): CharacterVelocityOverride | void;
+}
+`;
+// Emit the callback interface and point CharacterContactListener.implement at it (embind types it as `any`).
+function typeCharacterListener(src) {
+  const anchor = 'implement(obj: any): CharacterContactListenerWrapper;';
+  if (!src.includes(anchor)) fail('anchor for CharacterContactListener.implement not found');
+  src = src.replace(anchor, 'implement(obj: CharacterContactListenerCallbacks): CharacterContactListenerWrapper;');
+  if (!/export type JoltModule = /.test(src)) fail('anchor "export type JoltModule" not found (character listener types)');
+  return src.replace(/export type JoltModule = /, CHARACTER_LISTENER_TYPES + '\nexport type JoltModule = ');
+}
 function injectFacadeTypes(src) {
   if (!/export type JoltModule = /.test(src)) fail('anchor "export type JoltModule" not found');
   return src.replace(/export type JoltModule = ([^;]+);/, FACADE_TYPES + '\nexport type JoltModule = $1 & JoltFacade;');
@@ -188,7 +222,8 @@ function setBanner(src) {
 
 let src = readFileSync(rawTsdPath, 'utf8');
 for (const transform of [renameModule, labelTupleElements, applyOutParamTypes, applyCtorParams,
-                         applyReturnTypes, nameWrapperParams, stripInternal, injectFacadeTypes, setBanner])
+                         applyReturnTypes, nameWrapperParams, typeCharacterListener, stripInternal,
+                         injectFacadeTypes, setBanner])
   src = transform(src);
 writeFileSync(outTsdPath, src);
 console.log(`gen-bindings: wrote ${outTsdPath}`);

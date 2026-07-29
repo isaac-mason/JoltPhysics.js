@@ -438,7 +438,8 @@ struct BodyActivationListenerWrapper : public wrapper<BodyActivationListener> {
 // args marshal as plain arrays; the character + settings pass as non-owning handles
 // so JS can read the character and tweak ioSettings (mCanPushCharacter, ...). The
 // io-velocity callbacks can't mutate a Vec3& from JS (Vec3 is a value array), so JS
-// RETURNS the new velocity instead. The character-vs-character variants aren't surfaced.
+// RETURNS an object naming what to override instead — { velocity: [x,y,z] } for the
+// *ContactSolve callbacks, { linear?, angular? } for OnAdjustBodyVelocity.
 struct CharacterContactListenerWrapper : public wrapper<CharacterContactListener> {
     bool mHasValidate = false, mHasAdded = false, mHasPersisted = false, mHasRemoved = false;
     bool mHasAdjustBodyVelocity = false, mHasContactSolve = false;
@@ -492,8 +493,11 @@ struct CharacterContactListenerWrapper : public wrapper<CharacterContactListener
         val r = call<val>("OnCharacterContactSolve", handleOf(*c), handleOf(*other),
             (uint32)s2.GetValue(), Vec3(pos), Vec3(normal), Vec3(contactVel), Vec3(charVel),
             Vec3(ioNewCharVel));
-        if (!r.isUndefined() && !r.isNull())
-            ioNewCharVel = Vec3(r[0].as<float>(), r[1].as<float>(), r[2].as<float>());
+        if (!r.isUndefined() && !r.isNull()) {
+            val v = r["velocity"];
+            if (!v.isUndefined() && !v.isNull())
+                ioNewCharVel = Vec3(v[0].as<float>(), v[1].as<float>(), v[2].as<float>());
+        }
     }
     // OnAdjustBodyVelocity(character, body2, linearVelocity, angularVelocity) -> optionally
     // return { linear?: [x,y,z], angular?: [x,y,z] } to override (e.g. a conveyor belt).
@@ -507,8 +511,9 @@ struct CharacterContactListenerWrapper : public wrapper<CharacterContactListener
         if (!ang.isUndefined() && !ang.isNull()) ioAng = Vec3(ang[0].as<float>(), ang[1].as<float>(), ang[2].as<float>());
     }
     // OnContactSolve(character, bodyID2, subShapeID2, contactPosition, contactNormal,
-    //   contactVelocity, characterVelocity, newCharacterVelocity) -> optionally return a
-    // [x,y,z] to override the new character velocity (e.g. anti-sliding on gentle slopes).
+    //   contactVelocity, characterVelocity, newCharacterVelocity) -> optionally return
+    //   { velocity: [x,y,z] } to override the new character velocity (e.g. anti-sliding on
+    //   gentle slopes). Object form mirrors OnAdjustBodyVelocity; return nothing to leave it.
     void OnContactSolve(const CharacterVirtual *c, const BodyID &b2, const SubShapeID &s2,
                         RVec3Arg pos, Vec3Arg normal, Vec3Arg contactVel, const PhysicsMaterial *,
                         Vec3Arg charVel, Vec3 &ioNewCharVel) override {
@@ -516,8 +521,11 @@ struct CharacterContactListenerWrapper : public wrapper<CharacterContactListener
         val r = call<val>("OnContactSolve", handleOf(*c),
             (uint32)b2.GetIndexAndSequenceNumber(), (uint32)s2.GetValue(),
             Vec3(pos), Vec3(normal), Vec3(contactVel), Vec3(charVel), Vec3(ioNewCharVel));
-        if (!r.isUndefined() && !r.isNull())
-            ioNewCharVel = Vec3(r[0].as<float>(), r[1].as<float>(), r[2].as<float>());
+        if (!r.isUndefined() && !r.isNull()) {
+            val v = r["velocity"];
+            if (!v.isUndefined() && !v.isNull())
+                ioNewCharVel = Vec3(v[0].as<float>(), v[1].as<float>(), v[2].as<float>());
+        }
     }
     bool OnContactValidate(const CharacterVirtual *c, const BodyID &b2, const SubShapeID &s2) override {
         if (!mHasValidate) return true;
