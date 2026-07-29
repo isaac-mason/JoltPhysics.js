@@ -1,3 +1,13 @@
+// JoltPhysics.js facade — installed into the Emscripten module via --post-js.
+//
+// This file is a TEMPLATE, not linked directly. scripts/gen-bindings.mjs reads bindings.cpp's
+// compiled _outMeta()/_layoutMeta() getters off a probe module and substitutes the two
+// placeholder tokens below (the out-param reader list and the packed-buffer stride table) with
+// baked literals, emitting post.generated.js — which is what gets linked. So the metadata still
+// originates in bindings.cpp, but the shipped runtime never decodes those getters' return values
+// (a JSON string over growable wasm memory trips TextDecoder in the browser). The out-param scratch
+// pointer (_getOutScratch) is a runtime value and stays a runtime call. (Keep the raw tokens out of
+// comments — the build substitutes them by name.)
 (function () {
   // Post-js runs on pthread worker threads too, where embind isn't set up. Skip there.
   if (typeof ENVIRONMENT_IS_PTHREAD !== 'undefined' && ENVIRONMENT_IS_PTHREAD) return;
@@ -33,10 +43,10 @@
   }
 
   try {
-    // Bracket notation for JSON field access — closure compiler renames shorthand
-    // destructuring keys ({cls}) against its internal property names, breaking lookup
-    // against the runtime JSON from C++ which always uses the original key names.
-    for (const entry of JSON.parse(Module['_outMeta']())) {
+    // The reader list is baked in at build time (substituted for the token below from _outMeta()).
+    // Bracket notation for field access — the baked literal has quoted keys (JSON.stringify), which
+    // closure won't rename, so bracket access stays consistent.
+    for (const entry of __JOLT_OUT_META__) {
       const cls      = entry['cls'];
       const method   = entry['method'];
       const sizes    = entry['sizes'];
@@ -49,12 +59,16 @@
     console.error('JoltPhysics.js: failed to install out-param readers — all GetX(out) calls will malfunction:', e);
   }
 
-  // ---- stride constants (must match ContactListenerBuffer / ActiveBodyBuffer in bindings.cpp) ----
-  const CONTACT_I32_STRIDE = 6;  // body1, body2, subShape1, subShape2, ptStart, ptCount
-  const CONTACT_F32_STRIDE = 4;  // normalX, normalY, normalZ, penetrationDepth
-  const POINT_F32_STRIDE   = 6;  // on1(xyz), on2(xyz)
-  const REMOVED_I32_STRIDE = 4;  // body1, subShape1, body2, subShape2
-  const ACTIVE_BODY_STRIDE = 14; // id(u32), px,py,pz, rx,ry,rz,rw, lvx,lvy,lvz, avx,avy,avz
+  // ---- stride constants (baked from bindings.cpp namespace layout, via _layoutMeta()) ----
+  // The field READ order in each reader below must still match the C++ packing order by hand;
+  // these strides are the single source of truth so they can't drift. Bracket access: the baked
+  // literal has quoted keys closure won't rename.
+  const LAYOUT = __JOLT_LAYOUT__;
+  const CONTACT_I32_STRIDE = LAYOUT['contactI32']; // body1, body2, subShape1, subShape2, ptStart, ptCount
+  const CONTACT_F32_STRIDE = LAYOUT['contactF32']; // normalX, normalY, normalZ, penetrationDepth
+  const POINT_F32_STRIDE   = LAYOUT['pointF32'];   // on1(xyz), on2(xyz)
+  const REMOVED_I32_STRIDE = LAYOUT['removedI32']; // body1, subShape1, body2, subShape2
+  const ACTIVE_BODY_STRIDE = LAYOUT['activeBody']; // id(u32), px,py,pz, rx,ry,rz,rw, lvx,lvy,lvz, avx,avy,avz
 
   // ---- contact buffer ----
   // Public API names and property names use string-key bracket notation so closure

@@ -20,7 +20,6 @@
 #include "Jolt/Core/Color.h"
 
 #include <emscripten/bind.h>
-#include <sstream>
 
 using namespace emscripten;
 
@@ -71,20 +70,6 @@ struct smart_ptr_trait<JPH::RefConst<T>> {
 // namespace alongside the `using namespace emscripten/JPH` soup; pulled into scope with
 // `using namespace jsbind;` inside EMSCRIPTEN_BINDINGS.
 namespace jsbind {
-
-// Minimal JSON string escaping for the _*Meta serializers.
-static std::string jStr(const std::string& s) {
-    std::string o; o.reserve(s.size() + 2); o += '"';
-    for (char c : s) {
-        if      (c == '"')  o += "\\\"";
-        else if (c == '\\') o += "\\\\";
-        else if (c < 0x20)  { o += "\\u00";
-                               o += "0123456789abcdef"[((unsigned char)c >> 4) & 0xf];
-                               o += "0123456789abcdef"[ (unsigned char)c       & 0xf]; }
-        else o += c;
-    }
-    o += '"'; return o;
-}
 
 // Shared scratch for the out-param read paradigm (facade.js copies from here).
 // Static data => stable address, unaffected by heap growth; single-threaded JS
@@ -989,6 +974,22 @@ struct DebugRendererWrapper : public wrapper<DebugRendererEm> {
 };
 #endif
 
+// Packed-buffer strides — the single source of truth for how ContactListenerBuffer and
+// ActiveBodyBuffer lay out their flat wasm-heap tiers. Exposed via _layoutMeta() and baked
+// into post.js at build time (__JOLT_LAYOUT__), so the JS readers can't drift from the C++
+// packing. The per-field READ order in each reader still has to match the packing order by hand;
+// these constants only pin the strides. static_asserts are tripwires: change a stride here and
+// the packing/reading must be updated deliberately.
+namespace layout {
+    constexpr int contactI32 = 6;  // body1, body2, subShape1, subShape2, ptStart, ptCount
+    constexpr int contactF32 = 4;  // worldNormal(xyz), penetrationDepth
+    constexpr int pointF32   = 6;  // worldPointOn1(xyz), worldPointOn2(xyz)
+    constexpr int removedI32 = 4;  // body1, subShape1, body2, subShape2
+    constexpr int activeBody = 14; // id(u32 bits), pos(xyz), rot(xyzw), linVel(xyz), angVel(xyz)
+    static_assert(contactI32 == 6 && contactF32 == 4 && pointF32 == 6 && removedI32 == 4 && activeBody == 14,
+                  "layout strides changed — update ContactListenerBuffer/ActiveBodyBuffer packing and post.js readers");
+}
+
 // Buffering contact listener: appends contacts to flat wasm-heap tiers DURING the
 // step (pure C++, no JS crossing), for bulk zero-alloc reads after Step (post.js).
 // Added and persisted contacts are stored in separate tiers so JS can loop over
@@ -1036,7 +1037,7 @@ public:
 private:
     void Pack(std::vector<int32_t> &i32, std::vector<float> &f32, int &count,
               const Body &b1, const Body &b2, const ContactManifold &m) {
-        int32_t ptStart = (int32_t)(mPointsF32.size() / 6);
+        int32_t ptStart = (int32_t)(mPointsF32.size() / layout::pointF32);
         int32_t ptCount = (int32_t)m.mRelativeContactPointsOn1.size();
         i32.insert(i32.end(), {
             (int32_t)b1.GetID().GetIndexAndSequenceNumber(),
@@ -1068,11 +1069,11 @@ public:
         BodyIDVector ids;
         sys->GetActiveBodies(EBodyType::RigidBody, ids);
         mBodyCount = (int)ids.size();
-        mBodies.resize(mBodyCount * 14);
+        mBodies.resize(mBodyCount * layout::activeBody);
         const BodyInterface &bi = sys->GetBodyInterfaceNoLock();
         for (int i = 0; i < mBodyCount; i++) {
             const BodyID &id = ids[i];
-            float *d = mBodies.data() + i * 14;
+            float *d = mBodies.data() + i * layout::activeBody;
             uint32_t rawId = id.GetIndexAndSequenceNumber();
             std::memcpy(d, &rawId, 4);
             RVec3 pos = bi.GetPosition(id);
@@ -4099,55 +4100,62 @@ EMSCRIPTEN_BINDINGS(jolt) {
     // MI upcast helper: add a VehicleConstraint's PhysicsStepListener side to the system.
     emscripten::function("addVehicleStepListener", +[](PhysicsSystem *ps, VehicleConstraint *vc) { ps->AddStepListener(vc); }, allow_raw_pointers());
 
-    // ---- expose out-param / ctor metadata for facade.js + postprocess-tsd ----
-    // _outMeta: array of named-field objects (stable regardless of future field additions).
-    // Shape: {cls, method, sizes:[N], trailing:N, tsTypes:["T",...]}
-    emscripten::function("_outMeta", +[]() -> std::string {
-        std::ostringstream ss;
-        ss << "[";
-        bool first = true;
+    // ---- expose out-param / ctor / return / layout metadata for post.js + gen-bindings.mjs ----
+    // Getters return emscripten::val (native JS objects/arrays), NOT JSON strings: the build
+    // reads them straight off a probe module in-process, and the shipped runtime never decodes a
+    // string over growable wasm memory (which TextDecoder rejects in the browser).
+    //
+    // _outMeta: array of {cls, method, sizes:[N], trailing, tsTypes:["T",...]}
+    emscripten::function("_outMeta", +[]() -> val {
+        val arr = val::array();
         for (const auto& e : sOutRegistry) {
-            if (!first) ss << ","; first = false;
-            ss << "{\"cls\":" << jStr(e.cls) << ",\"method\":" << jStr(e.method) << ",\"sizes\":[";
-            for (int i = 0; i < (int)e.sizes.size(); i++) { if (i) ss << ","; ss << e.sizes[i]; }
-            ss << "],\"trailing\":" << e.trailing << ",\"tsTypes\":[";
-            for (int i = 0; i < (int)e.tsTypes.size(); i++) { if (i) ss << ","; ss << jStr(e.tsTypes[i]); }
-            ss << "]}";
+            val o = val::object();
+            o.set("cls", e.cls); o.set("method", e.method);
+            val sizes = val::array();
+            for (int s : e.sizes) sizes.call<void>("push", s);
+            o.set("sizes", sizes);
+            o.set("trailing", e.trailing);
+            val tsTypes = val::array();
+            for (const auto& t : e.tsTypes) tsTypes.call<void>("push", t);
+            o.set("tsTypes", tsTypes);
+            arr.call<void>("push", o);
         }
-        ss << "]";
-        return ss.str();
+        return arr;
     });
     // _ctorMeta: {ClassName: [{n: paramName, t?: tsType}, ...]}
-    emscripten::function("_ctorMeta", +[]() -> std::string {
-        std::ostringstream ss;
-        ss << "{";
-        bool first = true;
+    emscripten::function("_ctorMeta", +[]() -> val {
+        val obj = val::object();
         for (const auto& e : sCtorRegistry) {
-            if (!first) ss << ","; first = false;
-            ss << jStr(e.cls) << ":[";
-            for (size_t i = 0; i < e.params.size(); i++) {
-                if (i) ss << ",";
-                ss << "{\"n\":" << jStr(e.params[i].name);
-                if (!e.params[i].tsType.empty()) ss << ",\"t\":" << jStr(e.params[i].tsType);
-                ss << "}";
+            val params = val::array();
+            for (const auto& p : e.params) {
+                val po = val::object();
+                po.set("n", p.name);
+                if (!p.tsType.empty()) po.set("t", p.tsType);
+                params.call<void>("push", po);
             }
-            ss << "]";
+            obj.set(e.cls, params);
         }
-        ss << "}";
-        return ss.str();
+        return obj;
     });
     // _retMeta: array of {cls, method, tsType} — return-type overrides from the ": T" DSL.
-    emscripten::function("_retMeta", +[]() -> std::string {
-        std::ostringstream ss;
-        ss << "[";
-        bool first = true;
+    emscripten::function("_retMeta", +[]() -> val {
+        val arr = val::array();
         for (const auto& e : sRetRegistry) {
-            if (!first) ss << ","; first = false;
-            ss << "{\"cls\":" << jStr(e.cls) << ",\"method\":" << jStr(e.method)
-               << ",\"tsType\":" << jStr(e.tsType) << "}";
+            val o = val::object();
+            o.set("cls", e.cls); o.set("method", e.method); o.set("tsType", e.tsType);
+            arr.call<void>("push", o);
         }
-        ss << "]";
-        return ss.str();
+        return arr;
+    });
+    // _layoutMeta: packed-buffer strides (see namespace layout) baked into post.js as __JOLT_LAYOUT__.
+    emscripten::function("_layoutMeta", +[]() -> val {
+        val o = val::object();
+        o.set("contactI32", layout::contactI32);
+        o.set("contactF32", layout::contactF32);
+        o.set("pointF32",   layout::pointF32);
+        o.set("removedI32", layout::removedI32);
+        o.set("activeBody", layout::activeBody);
+        return o;
     });
 
 #ifdef JPH_DEBUG_RENDERER

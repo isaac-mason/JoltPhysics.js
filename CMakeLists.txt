@@ -5,6 +5,10 @@ set(EMSCRIPTEN_ROOT $ENV{EMSDK}/upstream/emscripten CACHE STRING "Emscripten pat
 set(CMAKE_TOOLCHAIN_FILE ${EMSCRIPTEN_ROOT}/cmake/Modules/Platform/Emscripten.cmake)
 set(JOLT_PRE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pre.js)
 set(JOLT_POST_FILE ${CMAKE_CURRENT_SOURCE_DIR}/post.js)
+# post.js is a template (carries __JOLT_OUT_META__ / __JOLT_LAYOUT__ tokens). The typing step
+# below bakes the binding-site metadata into it and emits this generated file, which is what the
+# flavor links actually --post-js. Per build dir; the metadata is identical across that dir's flavors.
+set(JOLT_POST_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/post.generated.js)
 set(JOLT_NO_FINALIZER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/no-finalizer.js)
 set(JOLT_HEADER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/JoltJS.h)
 set(JOLT_BINDINGS_FILE ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
@@ -144,7 +148,7 @@ set(EMCC_ARGS
   ${CLOSURE_FLAG}
   ${CLOSURE_IMPORT_ARGS}
   ${MULTI_THREADED_FLAG}
-  --post-js ${JOLT_POST_FILE}
+  --post-js ${JOLT_POST_GENERATED}
   ${MEMORY_GROWTH_FLAG}
   -s ALLOW_TABLE_GROWTH=1
   ${ENVIRONMENT_FLAG}
@@ -210,28 +214,24 @@ else()
 endif()
 set(JOLT_BINDINGS_OBJ $<TARGET_OBJECTS:jolt_bindings>)
 
-# ---- generate the .d.ts via --emit-tsd (dedicated non-closure link), then
-#      post-process (constructor param names, module rename) into dist ----
+# ---- from one --emit-tsd probe link, generate BOTH the shipped dist/types.d.ts and the
+#      metadata-baked post.generated.js (facade). gen-bindings.mjs reads the binding-site
+#      metadata straight off the probe module (embind val getters — no JSON sidecars). ----
 set(JOLT_TYPING_RAW ${CMAKE_CURRENT_BINARY_DIR}/types.raw.d.ts)
-set(POSTPROCESS_TSD ${CMAKE_CURRENT_SOURCE_DIR}/scripts/postprocess-tsd.mjs)
-set(EXTRACT_META_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/scripts/extract-meta.mjs)
-set(JOLT_OUT_META  ${CMAKE_CURRENT_BINARY_DIR}/out-meta.json)
-set(JOLT_CTOR_META ${CMAKE_CURRENT_BINARY_DIR}/ctor-meta.json)
-set(JOLT_RET_META  ${CMAKE_CURRENT_BINARY_DIR}/ret-meta.json)
+set(GEN_BINDINGS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen-bindings.mjs)
 add_custom_command(
-	OUTPUT ${JOLT_TYPING}
+	OUTPUT ${JOLT_TYPING} ${JOLT_POST_GENERATED}
 	COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> -lembind --emit-tsd ${JOLT_TYPING_RAW}
 		-s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME="Jolt" -s WASM_BIGINT=1
 		-s ENVIRONMENT=web,node,worker -o ${CMAKE_CURRENT_BINARY_DIR}/types-probe.mjs
-	COMMAND node ${EXTRACT_META_SCRIPT}
+	COMMAND node ${GEN_BINDINGS}
 		${CMAKE_CURRENT_BINARY_DIR}/types-probe.mjs
-		${JOLT_OUT_META} ${JOLT_CTOR_META} ${JOLT_RET_META}
-	COMMAND node ${POSTPROCESS_TSD} ${JOLT_TYPING_RAW} ${JOLT_TYPING}
-		${JOLT_OUT_META} ${JOLT_CTOR_META} ${JOLT_RET_META}
-	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_TARGETS} ${POSTPROCESS_TSD} ${EXTRACT_META_SCRIPT}
-	COMMENT "Generating + post-processing JoltPhysics.js TypeScript definitions"
+		${JOLT_TYPING_RAW} ${JOLT_TYPING}
+		${JOLT_POST_FILE} ${JOLT_POST_GENERATED}
+	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_TARGETS} ${GEN_BINDINGS} ${JOLT_POST_FILE}
+	COMMENT "Generating JoltPhysics.js TypeScript definitions + facade"
 	VERBATIM)
-add_custom_target(jolt-typing ALL DEPENDS ${JOLT_TYPING})
+add_custom_target(jolt-typing ALL DEPENDS ${JOLT_TYPING} ${JOLT_POST_GENERATED})
 
 # ---- flavor outputs ----
 if (NOT BUILD_WASM_COMPAT_ONLY)
@@ -241,7 +241,7 @@ if (NOT BUILD_WASM_COMPAT_ONLY)
 		add_custom_command(
 			OUTPUT ${OUTPUT_BASE_NAME}.js
 			COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_JS_ARGS} -o ${OUTPUT_BASE_NAME}.js
-			DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_FILE} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
+			DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 			COMMENT "Building JoltPhysics.js javascript"
 			VERBATIM)
 		add_custom_target(jolt-javascript ALL DEPENDS ${OUTPUT_BASE_NAME}.js)
@@ -250,7 +250,7 @@ if (NOT BUILD_WASM_COMPAT_ONLY)
 	add_custom_command(
 		OUTPUT ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm
 		COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
-		DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_FILE} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
+		DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 		COMMENT "Building JoltPhysics.js webassembly"
 		VERBATIM)
 	add_custom_target(jolt-wasm ALL DEPENDS ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm)
@@ -271,7 +271,7 @@ add_custom_command(
 	OUTPUT ${OUTPUT_BASE_NAME}.wasm-compat.js
 	COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_COMPAT_ARGS} -o ${OUTPUT_BASE_NAME}.wasm-compat.js
 	${FIXUP_IMPORT_COMMAND}
-	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_FILE} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
+	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 	COMMENT "Building JoltPhysics.js compat webassembly"
 	VERBATIM)
 add_custom_target(jolt-wasm-compat ALL DEPENDS ${OUTPUT_BASE_NAME}.wasm-compat.js)

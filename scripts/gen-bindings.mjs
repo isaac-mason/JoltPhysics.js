@@ -1,18 +1,43 @@
-// Turns the raw `--emit-tsd` output into the shipped dist/types.d.ts. Applies the metadata
-// sidecars declared at the binding site (out-param / constructor / return types) and the fixes
-// emit-tsd can't make itself (module rename, value_array element labels, facade types). Each
-// transform fails loud if its anchor is missing, so an emsdk change can't silently ship a bad .d.ts.
+// Single source of the generated bindings artifacts, driven by the binding-site metadata that
+// bindings.cpp exposes via embind `val` getters (_outMeta/_ctorMeta/_retMeta/_layoutMeta). Reads
+// them straight off the --emit-tsd probe module in-process — no JSON strings, no sidecar files —
+// then produces both:
+//   1. dist/types.d.ts   — the raw --emit-tsd output with the fixes emit-tsd can't make itself
+//                          (module rename, value_array element labels, out-param/ctor/return types
+//                          from the binding site, facade types), internal getters stripped.
+//   2. post.generated.js — post.js with its __JOLT_OUT_META__ / __JOLT_LAYOUT__ tokens replaced by
+//                          baked literals, so the shipped runtime never decodes a getter's return.
+// Each .d.ts transform fails loud if its anchor is missing, so an emsdk change can't silently ship
+// a bad .d.ts.
 //
-// Usage: node postprocess-tsd.mjs <raw.d.ts> <out.d.ts> [out-meta.json] [ctor-meta.json] [ret-meta.json]
+// Usage: node gen-bindings.mjs <probe.mjs> <raw.d.ts> <out.d.ts> <post-template.js> <post-generated.js>
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
-const [, , inPath, outPath, outMetaPath, ctorMetaPath, retMetaPath] = process.argv;
-if (!inPath || !outPath) { console.error('usage: postprocess-tsd.mjs <in> <out> [out-meta] [ctor-meta] [ret-meta]'); process.exit(2); }
+const [, , probePath, rawTsdPath, outTsdPath, postTemplatePath, postOutPath] = process.argv;
+if (!probePath || !rawTsdPath || !outTsdPath || !postTemplatePath || !postOutPath) {
+  console.error('usage: gen-bindings.mjs <probe.mjs> <raw.d.ts> <out.d.ts> <post-template.js> <post-generated.js>');
+  process.exit(2);
+}
 
-const fail = (msg) => { console.error(`postprocess-tsd: ${msg}`); process.exit(1); };
-const warn = (msg) => console.warn(`postprocess-tsd: WARNING ${msg}`);
-const readJSON = (path, fallback) => (path ? JSON.parse(readFileSync(path, 'utf8')) : fallback);
+const fail = (msg) => { console.error(`gen-bindings: ${msg}`); process.exit(1); };
+const warn = (msg) => console.warn(`gen-bindings: WARNING ${msg}`);
+
+// ---- 1. read binding-site metadata off the emit-tsd probe (native JS objects via embind val) ----
+let outMeta, ctorMeta, retMeta, layoutMeta;
+try {
+  const jolt = await (await import(pathToFileURL(probePath).href)).default();
+  outMeta = jolt._outMeta();     // [{cls, method, sizes:[…], trailing, tsTypes:[…]}]
+  ctorMeta = jolt._ctorMeta();   // {ClassName: [{n, t?}, …]}
+  retMeta = jolt._retMeta();     // [{cls, method, tsType}]
+  layoutMeta = jolt._layoutMeta(); // {contactI32, contactF32, pointF32, removedI32, activeBody}
+} catch (e) {
+  fail(`failed to load probe binary "${probePath}": ${e?.message ?? e}`);
+}
+if (!Array.isArray(outMeta) || !outMeta.length) fail('_outMeta() returned no entries — did the out_function DSL change?');
+
+// ---- 2. postprocess the raw .d.ts ----
 
 // embind names the module MainModule/MainModuleFactory; the package exports it as Jolt.
 function renameModule(src) {
@@ -43,7 +68,7 @@ function labelTupleElements(src) {
 // out_function registers `XInto(out: number, ...): void`; _outMeta gives the real value type.
 function applyOutParamTypes(src) {
   const type = {};
-  for (const { method, tsTypes } of readJSON(outMetaPath, [])) type[method] = tsTypes?.[0] || 'Vec3';
+  for (const { method, tsTypes } of outMeta) type[method] = tsTypes?.[0] || 'Vec3';
   if (!/\w+Into\(out: number/.test(src)) warn('no *Into out-param methods found');
   return src.replace(/^(\s*)(\w+)Into\(out: number(, [^)]*)?\): void;/gm, (_, indent, name, rest) => {
     const t = type[name] || 'Vec3';
@@ -54,7 +79,7 @@ function applyOutParamTypes(src) {
 // embind can't name constructor params (emits `_0`); _ctorMeta gives each a name and, for `val`
 // params, a TS type that overrides emit-tsd's `any`.
 function applyCtorParams(src) {
-  const spec = readJSON(ctorMetaPath, {});
+  const spec = ctorMeta;
   const unmapped = new Set();
   src = src.replace(/^(\s*)new\(([^)]*)\): (\w+);/gm, (line, indent, params, cls) => {
     const ps = spec[cls];
@@ -73,9 +98,8 @@ function applyCtorParams(src) {
 // A lambda returning emscripten::val emits as `any`; _retMeta gives the real type per (class,
 // method). The rewrite is scoped to the declaring interface and matches any param list.
 function applyReturnTypes(src) {
-  const meta = readJSON(retMetaPath, []);
   const byClass = {};
-  for (const { cls, method, tsType } of meta) (byClass[cls] ??= {})[method] = tsType;
+  for (const { cls, method, tsType } of retMeta) (byClass[cls] ??= {})[method] = tsType;
   const seen = new Set();
   let cls = null;
   src = src.split('\n').map((line) => {
@@ -85,7 +109,7 @@ function applyReturnTypes(src) {
     if (m && byClass[cls][m[2]]) { seen.add(`${cls}.${m[2]}`); return `${m[1]}${m[2]}(${m[3]}): ${byClass[cls][m[2]]};`; }
     return line;
   }).join('\n');
-  for (const { cls, method } of meta)
+  for (const { cls, method } of retMeta)
     if (!seen.has(`${cls}.${method}`)) warn(`return-type override for ${cls}.${method} matched no "): any;" line`);
   return src;
 }
@@ -96,7 +120,19 @@ function nameWrapperParams(src) {
            .replace(/\bextend\(_0: (EmbindString), _1: any\)/g, 'extend(name: $1, obj: any)');
 }
 
-// facade.js is hand-written JS with no embind binding, so its types are declared here and merged
+// The metadata getters + out-param scratch pointer are internal plumbing (read by the build /
+// facade), not public API — strip them from the shipped types. With `val` return they emit as
+// `any`; _getOutScratch is a `number`.
+function stripInternal(src) {
+  for (const name of ['_getOutScratch', '_outMeta', '_ctorMeta', '_retMeta', '_layoutMeta']) {
+    const re = new RegExp(`^\\s*${name}\\(\\): (?:any|number);\\r?\\n`, 'm');
+    if (!re.test(src)) warn(`internal getter ${name} not found to strip`);
+    src = src.replace(re, '');
+  }
+  return src;
+}
+
+// post.js is hand-written JS with no embind binding, so its types are declared here and merged
 // into the module type.
 const FACADE_TYPES = `
 export type Contact = {
@@ -147,12 +183,22 @@ function injectFacadeTypes(src) {
 function setBanner(src) {
   return src.replace(/^\/\/ TypeScript bindings.*$/m,
     '// TypeScript definitions for JoltPhysics.js. Auto-generated (embind --emit-tsd +\n' +
-    '// scripts/postprocess-tsd.mjs). Do not edit by hand.');
+    '// scripts/gen-bindings.mjs). Do not edit by hand.');
 }
 
-let src = readFileSync(inPath, 'utf8');
+let src = readFileSync(rawTsdPath, 'utf8');
 for (const transform of [renameModule, labelTupleElements, applyOutParamTypes, applyCtorParams,
-                         applyReturnTypes, nameWrapperParams, injectFacadeTypes, setBanner])
+                         applyReturnTypes, nameWrapperParams, stripInternal, injectFacadeTypes, setBanner])
   src = transform(src);
-writeFileSync(outPath, src);
-console.log(`postprocess-tsd: wrote ${outPath}`);
+writeFileSync(outTsdPath, src);
+console.log(`gen-bindings: wrote ${outTsdPath}`);
+
+// ---- 3. codegen the facade post-js: bake the metadata literals into the template ----
+const postTemplate = readFileSync(postTemplatePath, 'utf8');
+for (const tok of ['__JOLT_OUT_META__', '__JOLT_LAYOUT__'])
+  if (!postTemplate.includes(tok)) fail(`token ${tok} missing from ${postTemplatePath}`);
+const postGen = postTemplate
+  .replaceAll('__JOLT_OUT_META__', JSON.stringify(outMeta))
+  .replaceAll('__JOLT_LAYOUT__', JSON.stringify(layoutMeta));
+writeFileSync(postOutPath, postGen);
+console.log(`gen-bindings: wrote ${postOutPath}`);
