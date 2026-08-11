@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>JoltPhysics.js falling shapes steroids</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
+	</head>
+	<body>
+		<div id="container">Loading...</div>
+		<div id="info">JoltPhysics.js falling shapes steroids<br/>
+		High spawn-rate stress test with memory overlay</div>
+
+		<script type="module">
+			// If you haven't built locally, swap for: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as THREE from 'three';
+			import * as Example from './js/example.js';
+			import { initExample, createFloor, createMeshFloor, addToScene, removeFromScene, getRandomQuat, DegreesToRadians, LAYER_MOVING } from './js/example.js';
+			import { showJoltMemory } from '../Examples common/jolt-memory.js';
+
+			const Jolt = await initJolt();
+
+			// Spawning variables
+			var objectTimePeriod = 0.01;
+			var shapesCreatedPerTick = 100;
+			var timeNextSpawn = Example.time + objectTimePeriod;
+			var maxNumObjects = 500;
+			var stopAtShapesCreated = 20000;
+			var totalShapesCreated = 0;
+
+			// Initialize this example
+			initExample(Jolt, onUpdate);
+			const memory = showJoltMemory(Jolt);
+			memory.setCustomField('Shapes created', totalShapesCreated);
+			const bodyInterface = Example.bodyInterface;
+
+			// Create a basic floor
+			createFloor();
+
+			// Create example mesh
+			createMeshFloor(30, 1, 4, 0, 5, 0);
+
+			const quatAxisAngle = (x, y, z, angle) => {
+				const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(x, y, z), angle);
+				return [q.x, q.y, q.z, q.w];
+			};
+
+			function generateObject() {
+
+				let numTypes = 10;
+				let objectType = Math.ceil(Math.random() * numTypes);
+
+				let shape = null;
+
+				let colors = [0xff0000, 0xd9b1a3, 0x4d4139, 0xccad33, 0xf2ff40, 0x00ff00, 0x165943, 0x567371, 0x80d5ff, 0x69778c, 0xbeb6f2, 0x7159b3, 0x73004d, 0xd90074, 0xff8091, 0xbf3030, 0x592400, 0xa66c29, 0xb3aa86, 0x296600, 0x00e600, 0x66ccaa, 0x00eeff, 0x3d9df2, 0x000e33, 0x3d00e6, 0xb300a7, 0xff80d5, 0x330d17, 0x59332d, 0xff8c40, 0x33210d, 0x403c00, 0x89d96c, 0x0d3312, 0x0d3330, 0x005c73, 0x0066ff, 0x334166, 0x1b0066, 0x4d3949, 0xbf8faf, 0x59000c, 0x0000ff]
+
+				switch (objectType) {
+					case 1: {
+						// Sphere
+						let radius = 0.5 + Math.random();
+						shape = new Jolt.SphereShape(radius);
+						break;
+					}
+
+					case 2: {
+						// Box
+						let sx = 1 + Math.random();
+						let sy = 1 + Math.random();
+						let sz = 1 + Math.random();
+						shape = new Jolt.BoxShape([sx * 0.5, sy * 0.5, sz * 0.5]);
+						break;
+					}
+
+					case 3: {
+						// Cylinder
+						let radius = 0.5 + Math.random();
+						let halfHeight = 0.5 + 0.5 * Math.random();
+						shape = new Jolt.CylinderShape(halfHeight, radius);
+						break;
+					}
+
+					case 4: {
+
+						// Tapered cylinder
+						let topRadius = 0.1 + Math.random();
+						let bottomRadius = 0.5 + Math.random();
+						let halfHeight = 0.5 * (topRadius + bottomRadius + Math.random());
+						let shapeSettings = new Jolt.TaperedCylinderShapeSettings(halfHeight, topRadius, bottomRadius);
+						let shapeResult = shapeSettings.Create();
+						shape = shapeResult.Get();
+						
+						shapeSettings.delete();
+						shapeResult.delete();
+						break;
+					}
+
+					case 5: {
+						// Capsule
+						let radius = 0.5 + Math.random();
+						let halfHeight = 0.5 + 0.5 * Math.random();
+						shape = new Jolt.CapsuleShape(halfHeight, radius);
+						break;
+					}
+
+					case 6: {
+						// Tapered capsule
+						let topRadius = 0.1 + Math.random();
+						let bottomRadius = 0.5 + Math.random();
+						let halfHeight = 0.5 * (topRadius + bottomRadius + Math.random());
+						let shapeSettings = new Jolt.TaperedCapsuleShapeSettings(halfHeight, topRadius, bottomRadius);
+						let shapeResult = shapeSettings.Create();
+						shape = shapeResult.Get();
+						shapeSettings.delete();
+						shapeResult.delete();
+						break;
+					}
+
+					case 7: {
+						// Convex hull
+						const points = new Jolt.ArrayVec3();
+						for (let p = 0; p < 10; ++p)
+							points.push_back([-0.5 + 2 * Math.random(), -0.5 + 2 * Math.random(), -0.5 + 2 * Math.random()]);
+						let shapeSettings = new Jolt.ConvexHullShapeSettings(points);
+						let shapeResult = shapeSettings.Create();
+						shape = shapeResult.Get();
+						shapeSettings.delete();
+						shapeResult.delete();
+						points.delete();
+						break;
+					}
+
+					case 8: {
+						
+						// Static compound shape
+						let shapeSettings = new Jolt.StaticCompoundShapeSettings();
+						let l = 1.0 + Math.random();
+						let r2 = 0.5 + 0.5 * Math.random();
+						let r1 = 0.5 * r2;
+						const sphereShape = new Jolt.SphereShape(r2);
+						const capsuleShape = new Jolt.CapsuleShape(l, r1);
+						shapeSettings.AddShape([-l, 0, 0], [0, 0, 0, 1], sphereShape);
+						shapeSettings.AddShape([l, 0, 0], [0, 0, 0, 1], sphereShape);
+						shapeSettings.AddShape([0, 0, 0], quatAxisAngle(0, 0, 1, 0.5 * Math.PI), capsuleShape);
+						let shapeResult = shapeSettings.Create();
+						shape = shapeResult.Get();
+
+						sphereShape.delete();
+						capsuleShape.delete();
+						shapeSettings.delete();
+						shapeResult.delete();
+						break;
+					}
+
+					case 9: {
+						// Mutable compound shape
+						let shapeSettings = new Jolt.MutableCompoundShapeSettings();
+						let l = 1.0 + Math.random();
+						let r2 = 0.5 + 0.5 * Math.random();
+						let r1 = 0.5 * r2;
+						const sphereShape = new Jolt.SphereShape(r2);
+						const boxShape = new Jolt.BoxShape([r2, r2, r2]);
+						const capsuleShape = new Jolt.CapsuleShape(l, r1);
+						shapeSettings.AddShape([-l, 0, 0], [0, 0, 0, 1], sphereShape);
+						shapeSettings.AddShape([l, 0, 0], [0, 0, 0, 1], boxShape);
+						shapeSettings.AddShape([0, 0, 0], quatAxisAngle(0, 0, 1, 0.5 * Math.PI), capsuleShape);
+						let shapeResult = shapeSettings.Create();
+						shape = shapeResult.Get();
+						
+						shapeResult.delete();
+						shapeSettings.delete();
+						sphereShape.delete();
+						boxShape.delete();
+						capsuleShape.delete();
+						break;
+					}
+
+					case 10: {
+						// Sphere with COM offset
+						let radius = 0.5;
+						const sphereShape = new Jolt.SphereShape(radius);
+						let shapeSettings = new Jolt.OffsetCenterOfMassShapeSettings([0, -0.1 * radius, 0], sphereShape);
+						let shapeResult = shapeSettings.Create();
+						shape = shapeResult.Get();
+
+
+						shapeResult.delete();
+						shapeSettings.delete();
+						sphereShape.delete();
+						break;
+					}
+				}
+
+				// Position and rotate body
+				let pos = [(Math.random() - 0.5) * 25, 15, (Math.random() - 0.5) * 25];
+				let rot = getRandomQuat();
+
+				// Create physics body
+				let creationSettings = new Jolt.BodyCreationSettings(shape, pos, rot, Jolt.EMotionType.Dynamic, LAYER_MOVING);
+				creationSettings.mRestitution = 0.5;
+				let body = bodyInterface.CreateBody(creationSettings);
+
+				
+				//This was missing for proper cleanup
+				creationSettings.delete();
+				shape.delete();
+
+				addToScene(body, colors[objectType - 1]);
+				totalShapesCreated++;
+				memory.setCustomField('Shapes created', totalShapesCreated);
+			}
+
+			function removeObject() {
+				// Indices 0 and 1 are the floor / mesh floor — remove the oldest falling shape
+				removeFromScene(Example.dynamicObjects[2]);
+
+			}
+
+			function onUpdate(time, deltaTime) {
+				if(totalShapesCreated >= stopAtShapesCreated) {
+					return;
+				}
+				// Check if its time to spawn a new object
+				if (Example.dynamicObjects.length < maxNumObjects && time > timeNextSpawn) {
+					//it's fine to go over the maxNumObjects limit here
+					for(let i = 0; i < shapesCreatedPerTick; i++) {
+						generateObject();
+					}
+					timeNextSpawn = time + objectTimePeriod;
+				}
+
+				if(Example.dynamicObjects.length >= maxNumObjects) {
+					for(let i = 0; i < shapesCreatedPerTick; i++) {
+						removeObject();
+					}
+				}
+			}
+		</script>
+	</body>
+</html>

@@ -12,10 +12,27 @@ app.get('/*', function (req, res) {
 	res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
 	res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
 	res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-	let fn = req.originalUrl.split('?')[0];
-	if (fn === '/') fn = '/Examples/index.html';
-	else if (!path.extname(fn) && fs.existsSync(path.join(ROOT, fn + '.html'))) fn += '.html';
-	res.sendFile(path.join(ROOT, fn));
+	let fn = decodeURIComponent(req.originalUrl.split('?')[0]);
+	if (fn === '/' || fn === '/Examples' || fn === '/Examples/') {
+		return res.redirect('/Examples/index.html');
+	}
+	if (fn === '/favicon.ico') {
+		return res.status(404).end();
+	}
+	if (!path.extname(fn) && fs.existsSync(path.join(ROOT, fn + '.html'))) {
+		fn += '.html';
+	}
+	let filePath = path.join(ROOT, fn);
+	// Examples/index.html uses relative links (e.g. falling_shapes.html); if the
+	// browser URL was left at / those resolve at repo root — fall back to Examples/.
+	if (!fs.existsSync(filePath) && fn.endsWith('.html')) {
+		const inExamples = path.join(ROOT, 'Examples', path.basename(fn));
+		if (fs.existsSync(inExamples)) filePath = inExamples;
+	}
+	if (!fs.existsSync(filePath)) {
+		return res.status(404).end();
+	}
+	res.sendFile(filePath);
 });
 
 app.listen(3000);
