@@ -16,9 +16,23 @@
   if (!outScratch) { console.error('JoltPhysics.js: _getOutScratch() returned null — out-param readers not installed'); return; }
   const outScratchF32 = outScratch >>> 2;
 
-  function makeOutParamReader(rawIntoMethod, slotSizes, trailingArgCount) {
+  // Expand one forwarded (pass) arg `arg${i}` into the loose scalars its `*Into` writer expects,
+  // keyed by the pass kind from _outMeta. Unpacking the vec/quat/mat object here — rather than
+  // letting embind marshal it as a value_array — is what makes the crossing zero-alloc: only
+  // numbers cross, so there's no per-call wasm temp + destructor. Mirrors the mk*() rebuild in
+  // bindings.cpp. A 'scalar' pass is already a number and crosses unchanged.
+  function unpackPass(kind, a) {
+    switch (kind) {
+      case 'vec3':  return `${a}[0],${a}[1],${a}[2]`;
+      case 'quat':  return `${a}[0],${a}[1],${a}[2],${a}[3]`;
+      case 'mat44': return Array.from({length: 16}, (_, i) => `${a}[${i}]`).join(',');
+      default:      return a; // scalar — already a number
+    }
+  }
+
+  function makeOutParamReader(rawIntoMethod, slotSizes, passKinds, retTs) {
     const outParams   = slotSizes.map((_, i) => `out${i}`);
-    const trailParams = Array.from({length: trailingArgCount}, (_, i) => `arg${i}`);
+    const trailParams = passKinds.map((_, i) => `arg${i}`);
     const paramList   = [...outParams, ...trailParams].join(', ');
 
     let byteOffset = 0;
@@ -28,17 +42,34 @@
       return ptr;
     });
 
-    const intoArgList = [...scratchSlotPtrs, ...trailParams].join(', ');
+    // Each pass keeps one JS param (`arg${i}`, API-compatible) but expands into scalars here.
+    const passArgs = passKinds.map((kind, i) => unpackPass(kind, `arg${i}`));
+    const intoArgList = [...scratchSlotPtrs, ...passArgs].join(', ');
 
     const copyLoops = slotSizes.map((size, slotIndex) => {
       const f32Base = outScratchF32 + slotSizes.slice(0, slotIndex).reduce((a, x) => a + x, 0);
       return `for(let i=0;i<${size};i++) out${slotIndex}[i]=h[${f32Base}+i];`;
     }).join('');
 
-    const returnExpr = outParams.length === 1 ? outParams[0] : `[${outParams.join(',')}]`;
-
+    // Value-returning out_function: the outs are written into the caller's arrays; return the raw
+    // call's result (e.g. a success boolean) instead of an out. Zero-alloc for scalar returns.
+    if (retTs) {
+      return new Function('rawIntoMethod', 'Module',
+        `return function(${paramList}){const h=Module.HEAPF32;const _r=rawIntoMethod.call(this,${intoArgList});${copyLoops}return _r;}`
+      )(rawIntoMethod, Module);
+    }
+    // One out: return it directly (zero-alloc). Multiple: fill + return a per-reader reused tuple
+    // (allocated once here) so the convenience return costs no per-call allocation. It's a PACKED
+    // array literal (not new Array(N), which is HOLEY and never transitions back to the fast path).
+    if (outParams.length === 1) {
+      return new Function('rawIntoMethod', 'Module',
+        `return function(${paramList}){const h=Module.HEAPF32;rawIntoMethod.call(this,${intoArgList});${copyLoops}return ${outParams[0]};}`
+      )(rawIntoMethod, Module);
+    }
+    const emptyRet = `[${outParams.map(() => 'null').join(',')}]`;
+    const fillRet  = outParams.map((o, i) => `_ret[${i}]=${o};`).join('');
     return new Function('rawIntoMethod', 'Module',
-      `return function(${paramList}){const h=Module.HEAPF32;rawIntoMethod.call(this,${intoArgList});${copyLoops}return ${returnExpr};}`
+      `const _ret=${emptyRet};return function(${paramList}){const h=Module.HEAPF32;rawIntoMethod.call(this,${intoArgList});${copyLoops}${fillRet}return _ret;}`
     )(rawIntoMethod, Module);
   }
 
@@ -47,13 +78,14 @@
     // Bracket notation for field access — the baked literal has quoted keys (JSON.stringify), which
     // closure won't rename, so bracket access stays consistent.
     for (const entry of __JOLT_OUT_META__) {
-      const cls      = entry['cls'];
-      const method   = entry['method'];
-      const sizes    = entry['sizes'];
-      const trailing = entry['trailing'];
+      const cls       = entry['cls'];
+      const method    = entry['method'];
+      const sizes     = entry['sizes'];
+      const passKinds = entry['passKinds'];
+      const retTs     = entry['retTs'];
       const proto = Module[cls] && Module[cls].prototype;
       if (!proto) { console.warn(`JoltPhysics.js: _outMeta: unknown class "${cls}" — skipping ${method}`); continue; }
-      proto[method] = makeOutParamReader(proto[method + 'Into'], sizes, trailing);
+      proto[method] = makeOutParamReader(proto[method + 'Into'], sizes, passKinds, retTs);
     }
   } catch (e) {
     console.error('JoltPhysics.js: failed to install out-param readers — all GetX(out) calls will malfunction:', e);

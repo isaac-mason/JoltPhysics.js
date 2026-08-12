@@ -28,7 +28,7 @@ const warn = (msg) => console.warn(`gen-bindings: WARNING ${msg}`);
 let outMeta, ctorMeta, retMeta, layoutMeta;
 try {
   const jolt = await (await import(pathToFileURL(probePath).href)).default();
-  outMeta = jolt._outMeta();     // [{cls, method, sizes:[…], trailing, tsTypes:[…]}]
+  outMeta = jolt._outMeta();     // [{cls, method, names:[…], sizes:[…], outTs:[…], passKinds:[…], passTs:[…]}]
   ctorMeta = jolt._ctorMeta();   // {ClassName: [{n, t?}, …]}
   retMeta = jolt._retMeta();     // [{cls, method, tsType}]
   layoutMeta = jolt._layoutMeta(); // {contactI32, contactF32, pointF32, removedI32, activeBody}
@@ -65,15 +65,38 @@ function labelTupleElements(src) {
   return src;
 }
 
-// out_function registers `XInto(out: number, ...): void`; _outMeta gives the real value type.
+// out_function registers a raw `MethodInto(a0, a1, ...): void` (loose scalars — the facade unpacks
+// vecs/quats/mats before the wasm crossing). Replace each with the public reader signature rebuilt
+// from the binding-site metadata: `names` (public params, out slots then passes), `outTs` (out value
+// types) and `passTs` (input types). A multi-out getter returns a tuple of its out types. Scoped to
+// the declaring interface — same-named methods on different classes (GetPointVelocity on Body vs
+// BodyInterface) have different signatures, so a method-name-only map would cross them.
 function applyOutParamTypes(src) {
-  const type = {};
-  for (const { method, tsTypes } of outMeta) type[method] = tsTypes?.[0] || 'Vec3';
-  if (!/\w+Into\(out: number/.test(src)) warn('no *Into out-param methods found');
-  return src.replace(/^(\s*)(\w+)Into\(out: number(, [^)]*)?\): void;/gm, (_, indent, name, rest) => {
-    const t = type[name] || 'Vec3';
-    return `${indent}${name}(out: ${t}${rest || ''}): ${t};`;
-  });
+  const byClass = {};
+  for (const { cls, method, names, outTs, passTs, retTs } of outMeta)
+    (byClass[cls] ??= {})[method] = { names, outTs, passTs, retTs };
+  if (!/\w+Into\(/.test(src)) warn('no *Into out-param methods found');
+  const seen = new Set();
+  let cls = null;
+  src = src.split('\n').map((line) => {
+    const decl = line.match(/^export (?:interface|class) (\w+)/);
+    if (decl) { cls = decl[1]; return line; }
+    // A value-returning out_function renders `...Into(...): T`, not `: void` — match any return.
+    const m = cls && byClass[cls] && line.match(/^(\s*)(\w+)Into\([^)]*\): [^;]+;\s*$/);
+    if (m && byClass[cls][m[2]]) {
+      const { names, outTs, passTs, retTs } = byClass[cls][m[2]];
+      seen.add(`${cls}.${m[2]}`);
+      const paramTypes = [...outTs, ...passTs]; // positional: out slots then passes
+      const params = names.map((n, i) => `${n}: ${paramTypes[i]}`).join(', ');
+      // retTs (value-returning) wins; else single out returns itself, multi returns a tuple.
+      const ret = retTs || (outTs.length === 1 ? outTs[0] : `[${outTs.join(', ')}]`);
+      return `${m[1]}${m[2]}(${params}): ${ret};`;
+    }
+    return line;
+  }).join('\n');
+  for (const { cls, method } of outMeta)
+    if (!seen.has(`${cls}.${method}`)) warn(`out-param retype for ${cls}.${method} matched no "${method}Into(...): void;" line`);
+  return src;
 }
 
 // embind can't name constructor params (emits `_0`); _ctorMeta gives each a name and, for `val`
