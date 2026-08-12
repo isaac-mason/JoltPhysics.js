@@ -4336,15 +4336,16 @@ await run();
     buf['addedCount']     = impl['GetAddedCount']();
     buf['persistedCount'] = impl['GetPersistedCount']();
     buf['removedCount']   = impl['GetRemovedCount']();
-    buf._addedI32     = Module['HEAP32'];  buf._addedI32Base     = impl['AddedI32Ptr']()     >>> 2;
-    buf._addedF32     = Module['HEAPF32']; buf._addedF32Base     = impl['AddedF32Ptr']()     >>> 2;
-    buf._persistedI32 = Module['HEAP32'];  buf._persistedI32Base = impl['PersistedI32Ptr']() >>> 2;
-    buf._persistedF32 = Module['HEAPF32']; buf._persistedF32Base = impl['PersistedF32Ptr']() >>> 2;
-    buf._pointsF32    = Module['HEAPF32']; buf._pointsF32Base    = impl['PointsF32Ptr']()    >>> 2;
-    buf._removedI32   = Module['HEAP32'];  buf._removedI32Base   = impl['RemovedI32Ptr']()   >>> 2;
+    buf._addedI32Base     = impl['AddedI32Ptr']()     >>> 2;
+    buf._addedF32Base     = impl['AddedF32Ptr']()     >>> 2;
+    buf._persistedI32Base = impl['PersistedI32Ptr']() >>> 2;
+    buf._persistedF32Base = impl['PersistedF32Ptr']() >>> 2;
+    buf._pointsF32Base    = impl['PointsF32Ptr']()    >>> 2;
+    buf._removedI32Base   = impl['RemovedI32Ptr']()   >>> 2;
   }
 
-  function _readContact(i32, i32Base, f32, f32Base, buf, out, i) {
+  function _readContact(i32Base, f32Base, buf, out, i) {
+    const i32 = Module['HEAP32'], f32 = Module['HEAPF32'];
     const iBase = i32Base + i * CONTACT_I32_STRIDE;
     const fBase = f32Base + i * CONTACT_F32_STRIDE;
     out['body1']       = i32[iBase]     >>> 0;
@@ -4362,16 +4363,16 @@ await run();
   }
 
   function getContactBufferAddedAt(buf, out, i) {
-    return _readContact(buf._addedI32, buf._addedI32Base, buf._addedF32, buf._addedF32Base, buf, out, i);
+    return _readContact(buf._addedI32Base, buf._addedF32Base, buf, out, i);
   }
 
   function getContactBufferPersistedAt(buf, out, i) {
-    return _readContact(buf._persistedI32, buf._persistedI32Base, buf._persistedF32, buf._persistedF32Base, buf, out, i);
+    return _readContact(buf._persistedI32Base, buf._persistedF32Base, buf, out, i);
   }
 
   function getContactBufferRemovedAt(buf, out, i) {
     const iBase = buf._removedI32Base + i * REMOVED_I32_STRIDE;
-    const ri = buf._removedI32;
+    const ri = Module['HEAP32'];
     out['body1']    = ri[iBase]     >>> 0;
     out['subShape1']= ri[iBase + 1] >>> 0;
     out['body2']    = ri[iBase + 2] >>> 0;
@@ -4381,7 +4382,7 @@ await run();
 
   function getContactBufferPointAt(buf, out, contact, i) {
     const fBase = buf._pointsF32Base + (contact._ptStart + i) * POINT_F32_STRIDE;
-    const pf = buf._pointsF32;
+    const pf = Module['HEAPF32'];
     out['on1'][0] = pf[fBase];     out['on1'][1] = pf[fBase + 1]; out['on1'][2] = pf[fBase + 2];
     out['on2'][0] = pf[fBase + 3]; out['on2'][1] = pf[fBase + 4]; out['on2'][2] = pf[fBase + 5];
     return out;
@@ -4405,15 +4406,15 @@ await run();
     // them via bracket notation (dot-access would be renamed and mismatch).
     buf['_impl']['Refresh'](buf['_sys']);
     buf['bodyCount'] = buf['_impl']['GetBodyCount']();
-    const base   = buf['_impl']['BodiesF32Ptr']();
-    buf._f32Base = base >>> 2;
-    buf._f32     = Module['HEAPF32'];
-    buf._u32     = Module['HEAPU32'];
+    // Cache only the base offset (stable across heap growth — linear memory never
+    // moves existing data). The HEAP* views are re-grabbed per read below, since
+    // ALLOW_MEMORY_GROWTH detaches a cached view the moment the heap grows.
+    buf._f32Base = buf['_impl']['BodiesF32Ptr']() >>> 2;
   }
 
   function getActiveBodyBufferStateAt(buf, out, i) {
     const base = buf._f32Base + i * ACTIVE_BODY_STRIDE;
-    const f32 = buf._f32, u32 = buf._u32;
+    const f32 = Module['HEAPF32'], u32 = Module['HEAPU32'];
     out['id']          = u32[base];
     out['position'][0] = f32[base + 1];  out['position'][1] = f32[base + 2];  out['position'][2] = f32[base + 3];
     out['rotation'][0] = f32[base + 4];  out['rotation'][1] = f32[base + 5];
