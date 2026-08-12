@@ -1,6 +1,6 @@
 {
-	"name": "jolt-physics",
-	"version": "1.0.0",
+	"name": "@nilo-technologies/jolt-physics",
+	"version": "5.5.0-nilo.11",
 	"description": "A WebAssembly port of JoltPhysics, a rigid body physics and collision detection library, suitable for games and VR applications",
 	"type": "module",
 	"main": "dist/jolt-physics.wasm-compat.js",
@@ -17,10 +17,6 @@
 		"./wasm-compat": {
 			"types": "./dist/jolt-physics.wasm-compat.d.ts",
 			"default": "./dist/jolt-physics.wasm-compat.js"
-		},
-		"./debug-wasm-compat": {
-			"types": "./dist/jolt-physics.debug.wasm-compat.d.ts",
-			"default": "./dist/jolt-physics.debug.wasm-compat.js"
 		},
 		"./debug-wasm": {
 			"types": "./dist/jolt-physics.debug.wasm.d.ts",
@@ -56,8 +52,11 @@
 		"build": "sh build.sh",
 		"examples": "node serveexamples/serveexamples.cjs"
 	},
-	"homepage": "https://github.com/jrouwe/JoltPhysics.js",
-	"repository": "https://github.com/jrouwe/JoltPhysics.js.git",
+	"homepage": "https://github.com/nilo-technologies/JoltPhysics",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nilo-technologies/JoltPhysics.git"
+	},
 	"author": "jrouwe",
 	"license": "MIT",
 	"files": [
@@ -76,6 +75,9 @@
 		"./dist/jolt-physics.wasm.js",
 		"./dist/jolt-physics.wasm.d.ts",
 		"./dist/jolt-physics.wasm.wasm",
+		"./dist/jolt-physics.debug.wasm.js",
+		"./dist/jolt-physics.debug.wasm.d.ts",
+		"./dist/jolt-physics.debug.wasm.wasm",
 		"./dist/jolt-physics.multithread.wasm-compat.js",
 		"./dist/jolt-physics.multithread.wasm-compat.d.ts",
 		"./dist/jolt-physics.debug.multithread.wasm-compat.js",

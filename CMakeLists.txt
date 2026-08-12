@@ -15,6 +15,10 @@ set(JOLT_BINDINGS_FILE ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
 set(OUTPUT_FOLDER ${CMAKE_CURRENT_SOURCE_DIR}/dist/)
 set(JOLT_TYPING ${OUTPUT_FOLDER}types.d.ts)
 
+# NILO: fork additions live in cmake/NiloFork.cmake. Read it for context on the
+# `nilo_*` macro calls and the in-place `# NILO:` breadcrumbs scattered below.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/NiloFork.cmake")
+
 # Option to turn on memory profiling
 option(ENABLE_MEMORY_PROFILER "Enable emscriptens memory profiler to help find leaks" OFF)
 
@@ -37,7 +41,7 @@ option(BUILD_WASM_COMPAT_ONLY "Compile only the WASM compat version of the libra
 option(BUILD_WASM_SIDECAR_ONLY "Compile only the separate-.wasm sidecar flavor" OFF)
 
 # Enable for resizable heap, with some amount of slowness
-option(ALLOW_MEMORY_GROWTH "Allow Memory Growth" OFF)
+option(ALLOW_MEMORY_GROWTH "Allow Memory Growth" ON)
 
 # Closure-compile the JS glue (validated to work with embind; toggle off to isolate issues)
 option(USE_CLOSURE "Run the closure compiler on the generated JS" ON)
@@ -62,7 +66,9 @@ set(CPP_RTTI_ENABLED ON)                    # embind auto-downcasting relies on 
 # Override debug symbols
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	set(GENERATE_DEBUG_SYMBOLS ON)
-	set(JPH_DEBUG_SYMBOL_FORMAT "source-map" CACHE STRING "")
+	# NILO: full DWARF (level 3) instead of upstream's "source-map" — needed by Chrome's
+	# C/C++ DevTools Support extension; sidecar .wasm.map is unreachable in wasm-compat.
+	set(JPH_DEBUG_SYMBOL_FORMAT "3" CACHE STRING "")
 else()
 	set(GENERATE_DEBUG_SYMBOLS OFF)
 endif()
@@ -101,14 +107,17 @@ else()
 endif()
 
 # Include Jolt
-include(FetchContent)
-FetchContent_Declare(
-        JoltPhysics
-        GIT_REPOSITORY "https://github.com/jrouwe/JoltPhysics"
-        GIT_TAG "v5.5.0"
-		SOURCE_SUBDIR "Build"
-)
-FetchContent_MakeAvailable(JoltPhysics)
+# NILO: FetchContent override (JOLT_PHYSICS_PATH / GIT_REPO / GIT_TAG cache vars are
+# defined in cmake/NiloFork.cmake). Replaces upstream's `FetchContent_Declare(JoltPhysics
+# GIT_REPOSITORY ... GIT_TAG ... SOURCE_SUBDIR Build) + FetchContent_MakeAvailable`.
+nilo_declare_jolt_physics_fetchcontent()
+# NILO: resolve canonical C++ repo root and override Jolt target's include dirs so DWARF
+# prefix maps and Ninja-emitted -I paths agree on a single absolute prefix.
+nilo_resolve_jolt_physics_source_root()
+# NILO: compute portable DWARF prefix-map flags (Debug only) and apply them directly to
+# the Jolt target (so Jolt's object files carry portable DWARF paths). The embind bindings
+# link against Jolt, so they inherit the same include roots. Sets JPH_DEBUG_PREFIX_MAP_FLAGS.
+nilo_compute_debug_prefix_map_flags()
 
 # Enable resizable heap, with some amount of slowness. Default is 128*1024*1024 = 128MB
 if (ALLOW_MEMORY_GROWTH)
@@ -128,13 +137,19 @@ else()
 	set(INCLUDE_DEMANGLE_ALL_FLAG "")
 endif()
 
-if (USE_CLOSURE)
+# NILO: JPH_DEV_FAST_LINK (defined in cmake/NiloFork.cmake) skips the ~30s closure pass for
+# fast dev iteration. It overrides USE_CLOSURE so an iteration session with DevTools closed can
+# skip closure without editing the USE_CLOSURE default. See NiloFork.cmake for the full rationale.
+if (USE_CLOSURE AND NOT JPH_DEV_FAST_LINK)
 	set(CLOSURE_FLAG --closure=1)
 	set(CLOSURE_IMPORT_ARGS
 		"--closure-args=--dynamic_import_alias=replace_by_import"
 		"--closure-args=--externs"
 		"--closure-args=${CMAKE_CURRENT_SOURCE_DIR}/extern-import.js")
 else()
+	if (JPH_DEV_FAST_LINK)
+		message(STATUS "JPH_DEV_FAST_LINK=ON: skipping --closure=1 in EMCC link (dev iteration mode)")
+	endif()
 	set(CLOSURE_FLAG "")
 	set(CLOSURE_IMPORT_ARGS "")
 endif()
@@ -165,7 +180,9 @@ set(EMCC_ARGS
   ${ENABLE_SIMD_FLAG})
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-	set(EMCC_ARGS ${EMCC_ARGS} -g${JPH_DEBUG_SYMBOL_FORMAT} -s ASSERTIONS --closure=0)
+	# NILO: ${JPH_DEBUG_PREFIX_MAP_FLAGS} (from nilo_compute_debug_prefix_map_flags) makes DWARF
+	# source paths portable so Chrome's DWARF extension can locate sources via Path Substitutions.
+	set(EMCC_ARGS ${EMCC_ARGS} ${JPH_DEBUG_PREFIX_MAP_FLAGS} -g${JPH_DEBUG_SYMBOL_FORMAT} -s ASSERTIONS --closure=0)
 else()
 	set(EMCC_ARGS ${EMCC_ARGS} -O3)
 endif()
@@ -205,6 +222,8 @@ target_compile_features(jolt_bindings PRIVATE cxx_std_17)
 target_compile_options(jolt_bindings PRIVATE -Wall -fno-exceptions ${ENABLE_SIMD_FLAG})
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	target_compile_definitions(jolt_bindings PRIVATE JPH_DEBUG_RENDERER JPH_PROFILE_ENABLED _DEBUG)
+	# NILO: portable DWARF paths for the bindings TU too (matches the Jolt target + link args).
+	target_compile_options(jolt_bindings PRIVATE ${JPH_DEBUG_PREFIX_MAP_FLAGS})
 elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
 	target_compile_definitions(jolt_bindings PRIVATE JPH_DEBUG_RENDERER JPH_PROFILE_ENABLED NDEBUG)
 elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "Distribution")
