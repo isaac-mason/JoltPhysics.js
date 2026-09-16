@@ -521,8 +521,8 @@ export interface SoftBodyManifold extends ClassHandle {
   GetSensorContactBodyID(index: number): number;
   GetNumVertices(): number;
   GetVertex(index: number): SoftBodyVertex | null;
-  GetLocalContactPoint(out: Vec3, vertex: number): Vec3;
-  GetContactNormal(out: Vec3, vertex: number): Vec3;
+  GetLocalContactPoint(out: Vec3, vertex: SoftBodyVertex): Vec3;
+  GetContactNormal(out: Vec3, vertex: SoftBodyVertex): Vec3;
 }
 
 export interface SoftBodyShape extends Shape {
@@ -1006,7 +1006,7 @@ export interface PhysicsSystem extends ClassHandle {
   GetMaxBodies(): number;
   WereBodiesInContact(bodyID1: number, bodyID2: number): boolean;
   GetGravity(out: Vec3): Vec3;
-  GetRayHitNormal(out: Vec3, ray: number, hit: number): Vec3;
+  GetRayHitNormal(out: Vec3, ray: RRayCast, hit: RayCastResult): Vec3;
   GetBounds(out: AABox): AABox;
   SetGravity(gravity: Vec3): void;
   GetBodies(): number[];
