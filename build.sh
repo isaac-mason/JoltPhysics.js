@@ -75,12 +75,10 @@ DTSEOF
 }
 
 make_dts \
-	jolt-physics \
 	jolt-physics.wasm \
 	jolt-physics.wasm-compat \
 	jolt-physics.debug.wasm \
 	jolt-physics.debug.wasm-compat \
-	jolt-physics.multithread \
 	jolt-physics.multithread.wasm \
 	jolt-physics.multithread.wasm-compat \
 	jolt-physics.debug.multithread.wasm \
