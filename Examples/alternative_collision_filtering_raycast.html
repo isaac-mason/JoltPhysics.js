@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>JoltPhysics.js demo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
+	</head>
+	<body>
+		<div id="container">Loading...</div>
+		<div id="info">JoltPhysics.js mask-filtered raycast demo<br/>
+		Each downward ray is filtered to a group and only hits its matching floor</div>
+
+		<script type="module">
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as Example from './js/example.js';
+			import { initExample, createBox, addLine, addMarker } from './js/example.js';
+
+			const Jolt = await initJolt();
+			const GROUP_STATIC = 1, GROUP_FLOOR1 = 2, GROUP_FLOOR2 = 4, GROUP_FLOOR3 = 8;
+			const GROUP_ALL = GROUP_STATIC | GROUP_FLOOR1 | GROUP_FLOOR2 | GROUP_FLOOR3;
+
+			const setupMaskFiltering = (settings) => {
+				const objectFilter = new Jolt.ObjectLayerPairFilterMask();
+				const bpInterface = new Jolt.BroadPhaseLayerInterfaceMask(2);
+				bpInterface.ConfigureLayer(new Jolt.BroadPhaseLayer(0), GROUP_FLOOR1 | GROUP_STATIC, 0);
+				bpInterface.ConfigureLayer(new Jolt.BroadPhaseLayer(1), GROUP_FLOOR2 | GROUP_FLOOR3, 0);
+				settings.mObjectLayerPairFilter = objectFilter;
+				settings.mBroadPhaseLayerInterface = bpInterface;
+				settings.mObjectVsBroadPhaseLayerFilter = new Jolt.ObjectVsBroadPhaseLayerFilterMask(bpInterface);
+			};
+			initExample(Jolt, null, setupMaskFiltering);
+			const { jolt, physicsSystem } = Example;
+			const npq = physicsSystem.GetNarrowPhaseQuery();
+			const sGetObjectLayer = (group, mask) => Jolt.ObjectLayerPairFilterMask.sGetObjectLayer(group, mask);
+
+			createBox([0, 0, 0], [0, 0, 0, 1], [50, 0.5, 50], Jolt.EMotionType.Static, sGetObjectLayer(GROUP_STATIC, GROUP_STATIC));
+			createBox([0, 3, 0], [0, 0, 0, 1], [5, 0.5, 5], Jolt.EMotionType.Static, sGetObjectLayer(GROUP_STATIC, GROUP_FLOOR1), 0x9f0000);
+			createBox([0, 6, 0], [0, 0, 0, 1], [5, 0.5, 5], Jolt.EMotionType.Static, sGetObjectLayer(GROUP_STATIC, GROUP_FLOOR2), 0x009f00);
+			createBox([0, 9, 0], [0, 0, 0, 1], [5, 0.5, 5], Jolt.EMotionType.Static, sGetObjectLayer(GROUP_STATIC, GROUP_FLOOR3), 0x00009f);
+
+			const direction = [0, -10, 0];
+			const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+			const scale = (v, s) => [v[0] * s, v[1] * s, v[2] * s];
+			// each ray is filtered to a group (via the object layer it's cast against),
+			// so it only collides with the floor matching that group.
+			const cast = (origin, group) => {
+				addLine(origin, add(origin, direction), 0xff0000);
+				const hits = npq.CastRayAll(new Jolt.RRayCast(origin, direction), sGetObjectLayer(group, GROUP_ALL), jolt);
+				hits.forEach((hit) => {
+					addMarker(hit.point, 1, 0x00ffff);
+					addLine(hit.point, add(hit.point, scale(hit.normal, 2)), 0x00ff00);
+				});
+			};
+
+			cast([-4, 10, 0], GROUP_FLOOR1);   // -> red floor
+			cast([-2, 10, 0], GROUP_FLOOR2);   // -> green floor
+			cast([0, 10, 0], GROUP_FLOOR3);    // -> blue floor
+			cast([2, 10, 0], GROUP_STATIC);    // -> the big static floor
+			cast([4, 10, 0], GROUP_ALL);       // -> the first floor it reaches
+		</script>
+	</body>
+</html>

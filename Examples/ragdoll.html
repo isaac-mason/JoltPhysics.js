@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>JoltPhysics.js — ragdolls</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link rel="stylesheet" type="text/css" href="style.css">
+	<script type="importmap">
+	{
+		"imports": {
+			"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+			"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+		}
+	}
+	</script>
+</head>
+<body>
+	<div id="container">Loading…</div>
+	<div id="info">JoltPhysics.js — ragdolls (new embind API)<br/>Skeleton + RagdollSettings; parts rendered from Shape.GetTriangles()</div>
+
+	<script type="module">
+		import * as THREE from 'three';
+		import initJolt from '../dist/jolt-physics.wasm-compat.js';
+		import { createWorld, createRenderer, createBodySync, meshFromShape, LAYER_NON_MOVING, LAYER_MOVING } from './js/jolt-example.js';
+
+		const Jolt = await initJolt();
+		const { jolt, physicsSystem, bodyInterface } = createWorld(Jolt);
+		const view = createRenderer(document.getElementById('container'));
+		const sync = createBodySync(bodyInterface, view.scene);
+
+		const IDENTITY = [0, 0, 0, 1];
+		const Z90 = [0, 0, Math.SQRT1_2, Math.SQRT1_2];   // 90° about Z: Y-capsule -> X-capsule
+		const material = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0.05 });
+
+		// --- static ground ---
+		{
+			const half = [30, 0.5, 30];
+			const id = bodyInterface.CreateAndAddBody(
+				new Jolt.BodyCreationSettings(new Jolt.BoxShape(half), [0, -0.5, 0], IDENTITY, Jolt.EMotionType.Static, LAYER_NON_MOVING),
+				Jolt.EActivation.DontActivate);
+			const mesh = new THREE.Mesh(new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2), material(0x556655));
+			mesh.receiveShadow = true;
+			sync.add(id, mesh);
+		}
+
+		// --- humanoid ragdoll (T-pose; floppy point-constraint joints) ---
+		// [name, parentIndex, () => Jolt shape, position, rotation, jointPinWorldPos|null]
+		const cap = (halfCyl, r) => new Jolt.CapsuleShape(halfCyl, r);
+		const box = (hx, hy, hz) => new Jolt.BoxShape([hx, hy, hz]);
+		const PARTS = [
+			['pelvis',     -1, () => box(0.18, 0.13, 0.12), [0, 5.15, 0], IDENTITY, null],
+			['spine',       0, () => box(0.18, 0.22, 0.11), [0, 5.58, 0], IDENTITY, [0, 5.32, 0]],
+			['head',        1, () => new Jolt.SphereShape(0.16), [0, 6.08, 0], IDENTITY, [0, 5.9, 0]],
+			['upperArmL',   1, () => cap(0.16, 0.06), [-0.42, 5.74, 0], Z90, [-0.2, 5.76, 0]],
+			['lowerArmL',   3, () => cap(0.16, 0.05), [-0.78, 5.74, 0], Z90, [-0.6, 5.74, 0]],
+			['upperArmR',   1, () => cap(0.16, 0.06), [0.42, 5.74, 0],  Z90, [0.2, 5.76, 0]],
+			['lowerArmR',   5, () => cap(0.16, 0.05), [0.78, 5.74, 0],  Z90, [0.6, 5.74, 0]],
+			['upperLegL',   0, () => cap(0.26, 0.09), [-0.11, 4.62, 0], IDENTITY, [-0.11, 4.98, 0]],
+			['lowerLegL',   7, () => cap(0.26, 0.08), [-0.11, 3.92, 0], IDENTITY, [-0.11, 4.3, 0]],
+			['upperLegR',   0, () => cap(0.26, 0.09), [0.11, 4.62, 0],  IDENTITY, [0.11, 4.98, 0]],
+			['lowerLegR',   9, () => cap(0.26, 0.08), [0.11, 3.92, 0],  IDENTITY, [0.11, 4.3, 0]],
+		];
+
+		let groupCounter = 0;
+		function buildRagdoll(offset, color) {
+			const skeleton = new Jolt.Skeleton();
+			for (const [name, parent] of PARTS)
+				parent < 0 ? skeleton.AddRootJoint(name) : skeleton.AddJoint(name, parent);
+			skeleton.CalculateParentJointIndices();
+
+			const settings = new Jolt.RagdollSettings();
+			settings.SetSkeleton(skeleton);
+			settings.ResizeParts(PARTS.length);
+			// Keep EVERY embind handle referenced (not just the Ragdoll): the Skeleton, the
+			// RagdollSettings and the per-part shapes/constraint-settings all live inside the
+			// running ragdoll's C++ ref chain, but their JS *wrappers* are independent objects.
+			// A finalized wrapper releases its ref / .delete()s the C++ object mid-simulation ->
+			// use-after-free -> hang. retained[] outlives the page so none are ever collected.
+			retained.push(skeleton, settings);
+
+			const shapes = [];
+			PARTS.forEach(([name, parent, shapeFn, pos, rot, joint], i) => {
+				const shape = shapeFn(); shapes[i] = shape; retained.push(shape);
+				const part = settings.GetPart(i);
+				part.SetShape(shape);
+				part.mPosition = [pos[0] + offset[0], pos[1] + offset[1], pos[2] + offset[2]];
+				part.mRotation = rot;
+				part.mMotionType = Jolt.EMotionType.Dynamic;
+				part.mObjectLayer = LAYER_MOVING;
+				if (joint) {
+					const c = new Jolt.PointConstraintSettings();
+					const p = [joint[0] + offset[0], joint[1] + offset[1], joint[2] + offset[2]];
+					c.mPoint1 = p; c.mPoint2 = p;
+					part.SetToParent(c);
+					retained.push(c);
+				}
+			});
+
+			settings.Stabilize();
+			settings.DisableParentChildCollisions();
+			settings.CalculateBodyIndexToConstraintIndex();
+
+			const ragdoll = settings.CreateRagdoll(++groupCounter, 0, physicsSystem);
+			ragdoll.AddToPhysicsSystem(Jolt.EActivation.Activate);
+
+			// render each part from its actual collision shape (Shape.GetTriangles),
+			// synced with the center-of-mass transform (com:true).
+			const mat = material(color);
+			for (let i = 0; i < PARTS.length; i++)
+				sync.add(ragdoll.GetBodyID(i), meshFromShape(shapes[i], mat), { com: true });
+			return ragdoll;
+		}
+
+		// a little row of ragdolls, dropped so they crumple onto the floor
+		// NB: keep the Ragdoll handles referenced — each is a smart-pointer wrapper, and a
+		// discarded handle gets GC-finalized (embind calls .delete()), freeing the Ragdoll
+		// while its bodies are still in the physics system -> dangling Body* in the
+		// broadphase -> crash on the next Step.
+		const retained = [];
+		const colors = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0xa66cff];
+		for (let i = 0; i < colors.length; i++)
+			retained.push(buildRagdoll([(i - 1.5) * 3, 3 + i * 0.4, 0], colors[i]));
+
+		physicsSystem.OptimizeBroadPhase();
+		view.setOnFrame((dt) => {
+			jolt.Step(dt, 1);
+			sync.update();   // zero-alloc COM/world transform reads per body
+		});
+		view.start();
+	</script>
+</body>
+</html>

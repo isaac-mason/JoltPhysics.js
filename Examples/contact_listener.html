@@ -5,6 +5,14 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
 	</head>
 	<body>
 		<div id="container">Loading...</div>
@@ -13,77 +21,48 @@
 			<textarea rows="5" cols="60" id="collision-log"></textarea>
 		</div>
 
-		<script src="js/three/three.min.js"></script>
-		<script src="js/three/OrbitControls.js"></script>
-		<script src="js/three/WebGL.js"></script>
-		<script src="js/three/stats.min.js"></script>
-		<script src="js/example.js"></script>
-
 		<script type="module">
-			// In case you haven't built the library yourself, replace URL with: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
-			import initJolt from './js/jolt-physics.wasm-compat.js';
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as Example from './js/example.js';
+			import { initExample, createFloor, createSphere, LAYER_MOVING } from './js/example.js';
 
-			initJolt().then(function (Jolt) {
-				// Initialize this example
-				initExample(Jolt, null);
+			const Jolt = await initJolt();
+			initExample(Jolt, null);
+			const { physicsSystem, bodyInterface } = Example;
+			var collisionLog = document.getElementById('collision-log');
+			const v3 = (a) => `(${a[0].toFixed(2)}, ${a[1].toFixed(2)}, ${a[2].toFixed(2)})`;
 
-				// Get the text box
-				var collisionLog = document.getElementById('collision-log');
+			// activation events (Body id delivered as a plain number)
+			physicsSystem.SetBodyActivationListener(new Jolt.BodyActivationListener.implement({
+				OnBodyActivated: (bodyId, userData) => {
+					collisionLog.value += 'OnBodyActivated ' + bodyId + ' ' + userData + '\n';
+				},
+				OnBodyDeactivated: (bodyId, userData) => {
+					collisionLog.value += 'OnBodyDeactivated ' + bodyId + ' ' + userData + '\n';
+				},
+			}));
 
-				// Register activation listener
-				var activationListener = new Jolt.BodyActivationListenerJS;
-				activationListener.OnBodyActivated = (bodyId, userData) => {
-					bodyId = Jolt.wrapPointer(bodyId, Jolt.BodyID);
-					collisionLog.value += 'OnBodyActivated ' + bodyId.GetIndex() + ' ' + userData + '\n';
-				};
-				activationListener.OnBodyDeactivated = (bodyId, userData) => {
-					bodyId = Jolt.wrapPointer(bodyId, Jolt.BodyID);
-					collisionLog.value += 'OnBodyDeactivated ' + bodyId.GetIndex() + ' ' + userData + '\n';
-				};
-				physicsSystem.SetBodyActivationListener(activationListener);
+			createFloor();
+			var sphere = createSphere([0, 3, 0], 1, Jolt.EMotionType.Dynamic, LAYER_MOVING, 0x00ff00);
+			bodyInterface.SetUserData(sphere.GetID(), 1234567890n);
 
-				// Create a basic floor
-				createFloor();
-
-				// Create a sphere
-				var sphere = createSphere(new Jolt.RVec3(0, 3, 0), 1, Jolt.EMotionType_Dynamic, LAYER_MOVING, 0x00ff00);
-				sphere.SetUserData(1234567890);
-
-				// Register contact listener
-				const contactListener = new Jolt.ContactListenerJS();
-				contactListener.OnContactValidate = (body1, body2, baseOffset, collideShapeResult) => {
-					body1 = Jolt.wrapPointer(body1, Jolt.Body);
-					body2 = Jolt.wrapPointer(body2, Jolt.Body);
-					collideShapeResult = Jolt.wrapPointer(collideShapeResult, Jolt.CollideShapeResult);
-					collisionLog.value += 'OnContactValidate ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + collideShapeResult.mPenetrationAxis.ToString() + '\n';
-					return Jolt.ValidateResult_AcceptAllContactsForThisBodyPair;
-				};
-				contactListener.OnContactAdded = (body1, body2, manifold, settings) => {
-					body1 = Jolt.wrapPointer(body1, Jolt.Body);
-					body2 = Jolt.wrapPointer(body2, Jolt.Body);
-					manifold = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
-					settings = Jolt.wrapPointer(settings, Jolt.ContactSettings);
-					collisionLog.value += 'OnContactAdded ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + manifold.mWorldSpaceNormal.ToString() + '\n';
-
-					// Override the restitution to 0.5
+			physicsSystem.SetContactListener(new Jolt.ContactListener.implement({
+				OnContactValidate: (body1, body2, baseOffset, collideShapeResult) => {
+					collisionLog.value += 'OnContactValidate ' + body1.GetID() + ' ' + body2.GetID() + ' ' + v3(collideShapeResult.mPenetrationAxis) + '\n';
+					return Jolt.ValidateResult.AcceptAllContactsForThisBodyPair;
+				},
+				OnContactAdded: (body1, body2, manifold, settings) => {
+					collisionLog.value += 'OnContactAdded ' + body1.GetID() + ' ' + body2.GetID() + ' ' + v3(manifold.mWorldSpaceNormal) + '\n';
 					settings.mCombinedRestitution = 0.5;
-				};
-				contactListener.OnContactPersisted = (body1, body2, manifold, settings) => {
-					body1 = Jolt.wrapPointer(body1, Jolt.Body);
-					body2 = Jolt.wrapPointer(body2, Jolt.Body);
-					manifold = Jolt.wrapPointer(manifold, Jolt.ContactManifold);
-					settings = Jolt.wrapPointer(settings, Jolt.ContactSettings);
-					collisionLog.value += 'OnContactPersisted ' + body1.GetID().GetIndex() + ' ' + body2.GetID().GetIndex() + ' ' + manifold.mWorldSpaceNormal.ToString() + '\n';
-
-					// Override the restitution to 0.5
+				},
+				OnContactPersisted: (body1, body2, manifold, settings) => {
+					collisionLog.value += 'OnContactPersisted ' + body1.GetID() + ' ' + body2.GetID() + ' ' + v3(manifold.mWorldSpaceNormal) + '\n';
 					settings.mCombinedRestitution = 0.5;
-				};
-				contactListener.OnContactRemoved = (subShapePair) => {
-					subShapePair = Jolt.wrapPointer(subShapePair, Jolt.SubShapeIDPair);
-					collisionLog.value += 'OnContactRemoved ' + subShapePair.GetBody1ID().GetIndex() + ' ' + subShapePair.GetBody2ID().GetIndex() + '\n';
-				};
-				physicsSystem.SetContactListener(contactListener);
-			});
+				},
+				OnContactRemoved: (body1ID, subShape1, body2ID, subShape2) => {
+					collisionLog.value += 'OnContactRemoved ' + body1ID + ' ' + body2ID + '\n';
+				},
+			}));
 		</script>
 	</body>
 </html>

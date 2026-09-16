@@ -1,5 +1,5 @@
 
-const ObjectStreamIn = {
+export const ObjectStreamIn = {
 	parseObjectDefinition: function (lines) {
 		return lines.map(line => {
 			const parts = line.trim().split(/\s+/);

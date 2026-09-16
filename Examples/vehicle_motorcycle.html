@@ -1,274 +1,148 @@
 <!DOCTYPE html>
 <html lang="en">
+	<head>
+		<title>JoltPhysics.js demo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
+	</head>
+	<body>
+		<div id="container">Loading...</div>
+		<div id="info">JoltPhysics.js motorcycle demo<br/>
+		WASD to drive (the motorcycle self-balances via the lean controller)</div>
 
-<head>
-	<title>JoltPhysics.js demo</title>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-	<link rel="stylesheet" type="text/css" href="style.css">
-</head>
+		<script type="module">
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as THREE from 'three';
+			import * as Example from './js/example.js';
+			import { initExample, setOnUpdate, createVehicleTrack, DegreesToRadians, LAYER_MOVING } from './js/example.js';
 
-<body>
-	<div id="container">Loading...</div>
-	<div id="info">
-		JoltPhysics.js motorcycle controller demo<br />
-		WASD to move. Z to hand brake
-	</div>
+			const backWheelRadius = 0.31, backWheelWidth = 0.05, backWheelPosZ = -0.75;
+			const backSuspensionMinLength = 0.3, backSuspensionMaxLength = 0.5, backSuspensionFreq = 2.0, backBrakeTorque = 250.0;
+			const frontWheelRadius = 0.31, frontWheelWidth = 0.05, frontWheelPosZ = 0.75;
+			const frontSuspensionMinLength = 0.3, frontSuspensionMaxLength = 0.5, frontSuspensionFreq = 1.5, frontBrakeTorque = 500.0;
+			const halfVehicleLength = 0.4, halfVehicleWidth = 0.2, halfVehicleHeight = 0.3;
+			const maxSteeringAngle = DegreesToRadians(30), steerSpeed = 4.0, casterAngle = DegreesToRadians(30);
+			const vehicleMass = 240.0, maxPitchRollAngle = DegreesToRadians(60);
+			let previousForward = 1.0, currentRight = 0.0;
 
-	<script src="js/three/three.min.js"></script>
-	<script src="js/three/OrbitControls.js"></script>
-	<script src="js/three/WebGL.js"></script>
-	<script src="js/three/stats.min.js"></script>
-	<script src="js/example.js"></script>
+			const Jolt = await initJolt();
+			initExample(Jolt, null);
+			const { physicsSystem, bodyInterface, camera, controls } = Example;
+			const quatY = (angle) => { const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle); return [q.x, q.y, q.z, q.w]; };
+			const norm = (x, y, z) => new THREE.Vector3(x, y, z).normalize().toArray();
 
-	<script type="module">
-		// In case you haven't built the library yourself, replace URL with: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
-		import initJolt from './js/jolt-physics.wasm-compat.js';
-
-		const bodyPosition = [0, 2, 0];
-
-		const backWheelRadius = 0.31;
-		const backWheelWidth = 0.05;
-		const backWheelPosZ = -0.75;
-		const backSuspensionMinLength = 0.3;
-		const backSuspensionMaxLength = 0.5;
-		const backSuspensionFreq = 2.0;
-		const backBrakeTorque = 250.0;
-
-		const frontWheelRadius = 0.31;
-		const frontWheelWidth = 0.05;
-		const frontWheelPosZ = 0.75;
-		const frontSuspensionMinLength = 0.3;
-		const frontSuspensionMaxLength = 0.5;
-		const frontSuspensionFreq = 1.5;
-		const frontBrakeTorque = 500.0;
-
-		const halfVehicleLength = 0.4;
-		const halfVehicleWidth = 0.2;
-		const halfVehicleHeight = 0.3;
-
-		const maxSteeringAngle = DegreesToRadians(30);
-		const steerSpeed = 4.0;
-
-		// Angle of the front suspension
-		const casterAngle = DegreesToRadians(30);
-
-		const vehicleMass = 240.0;
-
-		const maxPitchRollAngle = DegreesToRadians(60);
-
-		let previousForward = 1.0;
-		let currentRight = 0.0;
-
-		initJolt().then(function (Jolt) {
-			// Initialize this example
-			window.Jolt = Jolt;
-			container = document.getElementById('container');
-			container.innerHTML = "";
-
-			initGraphics();
-			initPhysics();
 			createVehicleTrack();
 
-			// Create material for wheel
-			const texLoader = new THREE.TextureLoader();
-			const texture = texLoader.load('data:image/gif;base64,R0lGODdhAgACAIABAAAAAP///ywAAAAAAgACAAACA0QCBQA7');
-			texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-			texture.offset.set(0, 0);
-			texture.repeat.set(1, 1);
-			texture.magFilter = THREE.NearestFilter;
-			let wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
-			wheelMaterial.map = texture;
-
-			const wheelRight = new Jolt.Vec3(0, 1, 0);
-			const wheelUp = new Jolt.Vec3(1, 0, 0);
-
+			const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+			const _m = new Float32Array(16);
 			const createThreeWheel = (constraint, wheelIndex, body) => {
-				// Create wheel mesh
-				const joltWheel = constraint.GetWheel(wheelIndex);
-				const wheelSetting = joltWheel.GetSettings();
-				const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wheelSetting.mRadius, wheelSetting.mRadius, wheelSetting.mWidth, 20, 1), wheelMaterial);
+				const s = constraint.GetWheel(wheelIndex).GetSettings();
+				const wheel = new THREE.Mesh(new THREE.CylinderGeometry(s.mRadius, s.mRadius, s.mWidth, 20, 1), wheelMaterial);
+				wheel.matrixAutoUpdate = false;
 				body.add(wheel);
-
-				// Function to update the orientation of the wheel
-				wheel.updateLocalTransform = () => {
-					let transform = constraint.GetWheelLocalTransform(wheelIndex, wheelRight, wheelUp);
-					wheel.position.copy(wrapVec3(transform.GetTranslation()));
-					wheel.quaternion.copy(wrapQuat(transform.GetRotation().GetQuaternion()));
-				};
+				wheel.updateLocalTransform = () => { constraint.GetWheelLocalTransform(_m, wheelIndex, [0, 1, 0], [1, 0, 0]); wheel.matrix.fromArray(_m); };
 				wheel.updateLocalTransform();
-
 				return wheel;
-			}
+			};
 
-			// Create motorcycle body
-			const motorcycleShapeSettings = new Jolt.OffsetCenterOfMassShapeSettings(new Jolt.Vec3(0, -halfVehicleHeight, 0),
-				new Jolt.BoxShapeSettings(new Jolt.Vec3(halfVehicleWidth, halfVehicleHeight, halfVehicleLength)));
-			const motorcycleShape = motorcycleShapeSettings.Create().Get();
-			const motorcycleBodySettings = new Jolt.BodyCreationSettings(motorcycleShape, new Jolt.RVec3(...bodyPosition),
-				Jolt.Quat.prototype.sRotation(new Jolt.Vec3(0, 1, 0), Math.PI),
-				Jolt.EMotionType_Dynamic, LAYER_MOVING)
-			motorcycleBodySettings.mOverrideMassProperties = Jolt.EOverrideMassProperties_CalculateInertia;
-			motorcycleBodySettings.mMassPropertiesOverride.mMass = vehicleMass;
-			const motorcycleBody = bodyInterface.CreateBody(motorcycleBodySettings);
-			addToScene(motorcycleBody, 0xFF0000);
+			const mcShape = new Jolt.OffsetCenterOfMassShapeSettings([0, -halfVehicleHeight, 0],
+				new Jolt.BoxShape([halfVehicleWidth, halfVehicleHeight, halfVehicleLength])).Create().Get();
+			const mcBodySettings = new Jolt.BodyCreationSettings(mcShape, [0, 2, 0], quatY(Math.PI), Jolt.EMotionType.Dynamic, LAYER_MOVING);
+			mcBodySettings.mOverrideMassProperties = Jolt.EOverrideMassProperties.CalculateInertia;
+			mcBodySettings.GetMassPropertiesOverride().mMass = vehicleMass;
+			const mcBody = bodyInterface.CreateBody(mcBodySettings);
+			bodyInterface.AddBody(mcBody.GetID(), Jolt.EActivation.Activate);
+			const motorcycle = new THREE.Mesh(new THREE.BoxGeometry(2 * halfVehicleWidth, 2 * halfVehicleHeight, 2 * halfVehicleLength), new THREE.MeshPhongMaterial({ color: 0xff0000 }));
+			motorcycle.matrixAutoUpdate = false;
+			motorcycle.userData = { id: mcBody.GetID(), com: false };
+			Example.scene.add(motorcycle);
+			Example.dynamicObjects.push(motorcycle);
 
 			const vehicle = new Jolt.VehicleConstraintSettings();
 			vehicle.mMaxPitchRollAngle = maxPitchRollAngle;
-
-			const motorcycle = dynamicObjects[dynamicObjects.length - 1];
-
-			vehicle.mWheels.clear();
 			{
 				const front = new Jolt.WheelSettingsWV();
-				front.mPosition = new Jolt.Vec3(0.0, -0.9 * halfVehicleHeight, frontWheelPosZ);
+				front.mPosition = [0.0, -0.9 * halfVehicleHeight, frontWheelPosZ];
 				front.mMaxSteerAngle = maxSteeringAngle;
-				front.mSuspensionDirection = new Jolt.Vec3(0, -1, Math.tan(casterAngle)).Normalized();
-				front.mSteeringAxis = new Jolt.Vec3(0, 1, -Math.tan(casterAngle)).Normalized();
-				front.mRadius = frontWheelRadius;
-				front.mWidth = frontWheelWidth;
-				front.mSuspensionMinLength = frontSuspensionMinLength;
-				front.mSuspensionMaxLength = frontSuspensionMaxLength;
-				front.mSuspensionSpring.mFrequency = frontSuspensionFreq;
+				front.mSuspensionDirection = norm(0, -1, Math.tan(casterAngle));
+				front.mSteeringAxis = norm(0, 1, -Math.tan(casterAngle));
+				front.mRadius = frontWheelRadius; front.mWidth = frontWheelWidth;
+				front.mSuspensionMinLength = frontSuspensionMinLength; front.mSuspensionMaxLength = frontSuspensionMaxLength;
+				front.GetSuspensionSpring().mFrequency = frontSuspensionFreq;
 				front.mMaxBrakeTorque = frontBrakeTorque;
-
-				vehicle.mWheels.push_back(front);
-
+				vehicle.AddWheel(front);
 				const back = new Jolt.WheelSettingsWV();
-				back.mPosition = new Jolt.Vec3(0.0, -0.9 * halfVehicleHeight, backWheelPosZ);
+				back.mPosition = [0.0, -0.9 * halfVehicleHeight, backWheelPosZ];
 				back.mMaxSteerAngle = 0.0;
-				back.mRadius = backWheelRadius;
-				back.mWidth = backWheelWidth;
-				back.mSuspensionMinLength = backSuspensionMinLength;
-				back.mSuspensionMaxLength = backSuspensionMaxLength;
-				back.mSuspensionSpring.mFrequency = backSuspensionFreq;
+				back.mRadius = backWheelRadius; back.mWidth = backWheelWidth;
+				back.mSuspensionMinLength = backSuspensionMinLength; back.mSuspensionMaxLength = backSuspensionMaxLength;
+				back.GetSuspensionSpring().mFrequency = backSuspensionFreq;
 				back.mMaxBrakeTorque = backBrakeTorque;
-
-				vehicle.mWheels.push_back(back);
+				vehicle.AddWheel(back);
 			}
-
 			const controllerSettings = new Jolt.MotorcycleControllerSettings();
-			controllerSettings.mEngine.mMaxTorque = 150.0;
-			controllerSettings.mEngine.mMinRPM = 1000.0;
-			controllerSettings.mEngine.mMaxRPM = 10000.0;
-			controllerSettings.mTransmission.mShiftDownRPM = 2000.0;
-			controllerSettings.mTransmission.mShiftUpRPM = 8000.0;
-			controllerSettings.mTransmission.mClutchStrength = 2.0;
-			vehicle.mController = controllerSettings;
-
-			controllerSettings.mDifferentials.clear();
+			controllerSettings.GetEngine().mMaxTorque = 150.0;
+			controllerSettings.GetEngine().mMinRPM = 1000.0;
+			controllerSettings.GetEngine().mMaxRPM = 10000.0;
+			controllerSettings.GetTransmission().mShiftDownRPM = 2000.0;
+			controllerSettings.GetTransmission().mShiftUpRPM = 8000.0;
+			controllerSettings.GetTransmission().mClutchStrength = 2.0;
+			vehicle.SetController(controllerSettings);
 			const differential = new Jolt.VehicleDifferentialSettings();
-			differential.mLeftWheel = -1;
-			differential.mRightWheel = 1;
-			differential.mDifferentialRatio = 1.93 * 40.0 / 16.0;;
-			controllerSettings.mDifferentials.push_back(differential);
+			differential.mLeftWheel = -1; differential.mRightWheel = 1;
+			differential.mDifferentialRatio = 1.93 * 40.0 / 16.0;
+			controllerSettings.AddDifferential(differential);
 
-			const constraint = new Jolt.VehicleConstraint(motorcycleBody, vehicle);
-
-			const tester = new Jolt.VehicleCollisionTesterCastCylinder(LAYER_MOVING, 1);
-			constraint.SetVehicleCollisionTester(tester);
-
+			const constraint = new Jolt.VehicleConstraint(mcBody, vehicle);
+			constraint.SetVehicleCollisionTester(new Jolt.VehicleCollisionTesterCastCylinder(LAYER_MOVING, 1));
 			physicsSystem.AddConstraint(constraint);
-			const controller = Jolt.castObject(constraint.GetController(), Jolt.MotorcycleController);
+			Jolt.addVehicleStepListener(physicsSystem, constraint);
+			const controller = constraint.GetMotorcycleController();
 
-			const modelWheels = [];
-			for (let i = 0; i < vehicle.mWheels.size(); i++) {
-				modelWheels.push(createThreeWheel(constraint, i, motorcycle));
-			}
+			const modelWheels = [createThreeWheel(constraint, 0, motorcycle), createThreeWheel(constraint, 1, motorcycle)];
 
-			const input = {
-				forwardPressed: false,
-				backwardPressed: false,
-				leftPressed: false,
-				rightPressed: false,
-				handBrake: false
-			};
-
+			const input = { forwardPressed: false, backwardPressed: false, leftPressed: false, rightPressed: false, handBrake: false };
+			const _r = new Float32Array(4), _v = new Float32Array(3), _p = new Float32Array(3);
 			const prePhysicsUpdate = (deltaTime) => {
-				let forward = 0.0, right = 0.0, brake = 0.0, handBrake = 0.0;
-
-				forward = input.forwardPressed ? 1.0 : (input.backwardPressed ? -1.0 : 0.0);
-
+				let forward = input.forwardPressed ? 1.0 : (input.backwardPressed ? -1.0 : 0.0);
+				let brake = 0.0, handBrake = 0.0;
 				if (previousForward * forward < 0.0) {
-					const rotation = wrapQuat(motorcycleBody.GetRotation().Conjugated());
-					const linearV = wrapVec3(motorcycleBody.GetLinearVelocity());
-					const velocity = linearV.applyQuaternion(rotation).z;
-					if ((forward > 0.0 && velocity < -0.1) || (forward < 0.0 && velocity > 0.1)) {
-						// Brake while we've not stopped yet
-						forward = 0.0;
-						brake = 1.0;
-					}
-					else {
-						// When we've come to a stop, accept the new direction
-						previousForward = forward;
-					}
+					mcBody.GetRotation(_r); mcBody.GetLinearVelocity(_v);
+					const rot = new THREE.Quaternion(_r[0], _r[1], _r[2], _r[3]).conjugate();
+					const velocity = new THREE.Vector3(_v[0], _v[1], _v[2]).applyQuaternion(rot).z;
+					if ((forward > 0.0 && velocity < -0.1) || (forward < 0.0 && velocity > 0.1)) { forward = 0.0; brake = 1.0; }
+					else previousForward = forward;
 				}
-
-				if (input.handBrake) {
-					forward = 0.0;
-					handBrake = 1.0;
-				}
-
+				if (input.handBrake) { forward = 0.0; handBrake = 1.0; }
 				let inputRight = input.rightPressed ? 1.0 : (input.leftPressed ? -1.0 : 0.0);
-				if (inputRight > currentRight)
-					currentRight = Math.min(currentRight + steerSpeed * deltaTime, inputRight);
-				else if (inputRight < currentRight)
-					currentRight = Math.max(currentRight - steerSpeed * deltaTime, inputRight);
-				right = currentRight;
-
+				if (inputRight > currentRight) currentRight = Math.min(currentRight + steerSpeed * deltaTime, inputRight);
+				else if (inputRight < currentRight) currentRight = Math.max(currentRight - steerSpeed * deltaTime, inputRight);
+				const right = currentRight;
 				controller.SetDriverInput(forward, right, brake, handBrake);
 				if (right != 0.0 || forward != 0.0 || brake != 0.0 || handBrake != 0.0)
-					bodyInterface.ActivateBody(motorcycleBody.GetID());
-			}
+					bodyInterface.ActivateBody(mcBody.GetID());
+			};
 
 			controls.target = motorcycle.position;
-			let oldPos = wrapVec3(motorcycleBody.GetPosition());
-			onExampleUpdate = (time, deltaTime) => {
+			mcBody.GetPosition(_p); let oldPos = new THREE.Vector3(_p[0], _p[1], _p[2]);
+			setOnUpdate((time, deltaTime) => {
 				prePhysicsUpdate(deltaTime);
-
-				const pos = wrapVec3(motorcycleBody.GetPosition());
-				camera.position.add(pos.clone().sub(oldPos));
-				oldPos = pos;
-
+				mcBody.GetPosition(_p); const pos = new THREE.Vector3(_p[0], _p[1], _p[2]);
+				camera.position.add(pos.clone().sub(oldPos)); oldPos = pos;
 				modelWheels.forEach(wheel => wheel.updateLocalTransform());
-			}
+			});
 
-			document.addEventListener("keydown", onDocumentKeyDown, false);
-			document.addEventListener("keyup", onDocumentKeyUp, false);
-			function onDocumentKeyDown(event) {
-				var keyCode = event.key;
-				if (keyCode == 'w') {
-					input.forwardPressed = true;
-				} else if (keyCode == 's') {
-					input.backwardPressed = true;
-				} else if (keyCode == 'a') {
-					input.leftPressed = true;
-				} else if (keyCode == 'd') {
-					input.rightPressed = true;
-				} else if (keyCode == 'z') {
-					input.handBrake = true;
-				}
-			};
-			function onDocumentKeyUp(event) {
-				var keyCode = event.key;
-				if (keyCode == 'w') {
-					input.forwardPressed = false;
-				} else if (keyCode == 's') {
-					input.backwardPressed = false;
-				} else if (keyCode == 'a') {
-					input.leftPressed = false;
-				} else if (keyCode == 'd') {
-					input.rightPressed = false;
-				} else if (keyCode == 'z') {
-					input.handBrake = false;
-				}
-			};
-
-			physicsSystem.AddStepListener(new Jolt.VehicleConstraintStepListener(constraint));
-			renderExample();
-		});
-
-	</script>
-</body>
-
+			document.addEventListener('keydown', (e) => { const k = e.key; if (k == 'w') input.forwardPressed = true; else if (k == 's') input.backwardPressed = true; else if (k == 'a') input.leftPressed = true; else if (k == 'd') input.rightPressed = true; else if (k == 'z') input.handBrake = true; }, false);
+			document.addEventListener('keyup', (e) => { const k = e.key; if (k == 'w') input.forwardPressed = false; else if (k == 's') input.backwardPressed = false; else if (k == 'a') input.leftPressed = false; else if (k == 'd') input.rightPressed = false; else if (k == 'z') input.handBrake = false; }, false);
+		</script>
+	</body>
 </html>

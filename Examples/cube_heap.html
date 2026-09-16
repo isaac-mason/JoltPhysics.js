@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>JoltPhysics.js demo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+				"dat.gui": "https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.module.js"
+			}
+		}
+		</script>
+	</head>
+	<body>
+		<div id="container">Loading...</div>
+		<div id="info">JoltPhysics.js cube heap demo<br/>
+		A heap of cubes; some are continuously teleported back to the top</div>
+
+		<script type="module">
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import { GUI } from 'dat.gui';
+			import * as Example from './js/example.js';
+			import { initExample, createFloor, addToScene, removeFromScene, LAYER_MOVING } from './js/example.js';
+
+			const Jolt = await initJolt();
+			var settings = {
+				numberOfCubes: 200,
+				spawnHeight: 10,
+				spawnArea: 2.5,
+				gravity: -50,
+				respawnPerFrame: 1
+			};
+			var cubes = [];
+			var cubeShape = null;
+			initExample(Jolt, onUpdate);
+			const { physicsSystem, bodyInterface, dynamicObjects } = Example;
+			physicsSystem.SetGravity([0, settings.gravity, 0]);
+			createFloor();
+			cubeShape = new Jolt.BoxShape([0.25, 0.25, 0.25]);
+			function randomInRange(min, max) {
+				return Math.random() * (max - min) + min;
+			}
+			function spawnCube() {
+				var x = randomInRange(-settings.spawnArea, settings.spawnArea);
+				var y = randomInRange(0, settings.spawnHeight);
+				var z = randomInRange(-settings.spawnArea, settings.spawnArea);
+				var creationSettings = new Jolt.BodyCreationSettings(cubeShape, [x, y, z], [0, 0, 0, 1], Jolt.EMotionType.Dynamic, LAYER_MOVING);
+				creationSettings.mRestitution = 0;
+				creationSettings.mFriction = 0.5;
+				var body = bodyInterface.CreateBody(creationSettings);
+				var colors = [0xff6b6b, 0x4ecdc4, 0x45b7d1, 0xf7b731, 0x5f27cd, 0x00d2d3, 0x1dd1a1, 0xee5a6f, 0xf368e0, 0xff9ff3];
+				var color = colors[Math.floor(Math.random() * colors.length)];
+				addToScene(body, color);
+				cubes.push(body);
+			}
+			function updateCubeCount() {
+				var targetCount = settings.numberOfCubes;
+				var currentCount = cubes.length;
+				if (currentCount < targetCount) {
+					var toSpawn = targetCount - currentCount;
+					for (var i = 0; i < toSpawn; i++) {
+						spawnCube();
+					}
+				} else if (currentCount > targetCount) {
+					var toRemove = currentCount - targetCount;
+					for (var i = 0; i < toRemove; i++) {
+						var body = cubes.pop();
+						if (body) {
+							for (var j = 0; j < dynamicObjects.length; j++) {
+								if (dynamicObjects[j].userData.id === body.GetID()) {
+									removeFromScene(dynamicObjects[j]);
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+			updateCubeCount();
+			var gui = new GUI();
+			gui.add(settings, 'numberOfCubes', 0, 1000, 1)
+				.name('Number of Cubes')
+				.onChange(updateCubeCount);
+			gui.add(settings, 'spawnHeight', 1, 30, 1).name('Spawn Height');
+			gui.add(settings, 'spawnArea', 0.5, 10, 0.5).name('Spawn Area');
+			gui.add(settings, 'gravity', -100, -1, 1)
+				.name('Gravity')
+				.onChange(function(value) {
+					physicsSystem.SetGravity([0, value, 0]);
+				});
+			gui.add(settings, 'respawnPerFrame', 0, 10, 1).name('Respawn Per Frame');
+			function onUpdate(time, deltaTime) {
+				for (var i = 0; i < settings.respawnPerFrame && cubes.length > 0; i++) {
+					var randomIndex = Math.floor(Math.random() * cubes.length);
+					var cube = cubes[randomIndex];
+					var y = randomInRange(0, settings.spawnHeight);
+					bodyInterface.SetPositionAndRotation(cube.GetID(), [0, y, 0], [0, 0, 0, 1], Jolt.EActivation.Activate);
+					bodyInterface.SetLinearVelocity(cube.GetID(), [0, 0, 0]);
+					bodyInterface.SetAngularVelocity(cube.GetID(), [0, 0, 0]);
+				}
+			}
+		</script>
+	</body>
+</html>

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-if [ -z $1 ] 
+if [ -z $1 ]
 then
 	BUILD_TYPE=Distribution
 else
@@ -10,52 +10,80 @@ else
 fi
 
 rm -rf ./dist
-
 mkdir dist
 
-# Preamble: Debug non-compat (ST only) so the npm package ships the .debug.wasm.{js,wasm} pair
-# alongside the Release artifacts. JPH_OUTPUT_NAME_SUFFIX=.debug renames CMake's outputs in-place,
-# so no mv / sed rewrites are needed afterwards. MT debug is intentionally dropped (no consumers;
-# debug-wasm-compat and debug-wasm-compat-multithread used to embed a multi-MB base64 WASM blob in
-# JS, which crashed Chrome DevTools when setting C++ breakpoints).
-#
-# Wipe Build/Debug/ST so a previous run's cached BUILD_WASM_COMPAT_ONLY=ON (from the legacy
-# preamble) cannot poison this fresh non-compat configure. We also pass BUILD_WASM_COMPAT_ONLY=OFF
-# explicitly as defense-in-depth in case someone passes a non-empty pre-existing Build dir.
-#
-# Pass ``--verbose`` to ``cmake --build`` (forwards to Ninja ``-v``) only when you need the full
-# ``em++`` command line in CI logs (prefix maps, include flags, etc.). It bloats logs by ~20x;
-# leave it off for routine publishes.
+# Build order: Distribution first, Debug last. The Debug build's types.d.ts includes
+# the debug renderer types and is the most complete, so it wins the final types.d.ts.
+
 if [ $BUILD_TYPE != "Debug" ]
 then
-	rm -rf Build/Debug/ST
-	cmake -B Build/Debug/ST -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_COMPAT_ONLY=OFF -DJPH_OUTPUT_NAME_SUFFIX=.debug "${@}"
+	cmake -B Build/$BUILD_TYPE/ST -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${@}"
+	cmake --build Build/$BUILD_TYPE/ST -j`nproc`
+
+	cmake -B Build/$BUILD_TYPE/MT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${@}"
+	cmake --build Build/$BUILD_TYPE/MT -j`nproc`
+
+	cmake -B Build/Debug/ST -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_COMPAT_ONLY=ON "${@}"
 	cmake --build Build/Debug/ST -j`nproc`
+
+	cmake -B Build/Debug/MT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_COMPAT_ONLY=ON "${@}"
+	cmake --build Build/Debug/MT -j`nproc`
+
+	# Debuggable debug builds: separate-.wasm sidecars (jolt-physics.debug[.multithread].wasm.js
+	# + .wasm.wasm). The base64-embedded compat debug builds OOM bundlers (Vercel) and break
+	# Chrome C++ breakpoints, so ship a separate-.wasm sidecar for ST and MT.
+	cmake -B Build/Debug/SidecarST -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_SIDECAR_ONLY=ON "${@}"
+	cmake --build Build/Debug/SidecarST -j`nproc`
+
+	cmake -B Build/Debug/SidecarMT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_SIDECAR_ONLY=ON "${@}"
+	cmake --build Build/Debug/SidecarMT -j`nproc`
+else
+	cmake -B Build/Debug/ST -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_COMPAT_ONLY=ON "${@}"
+	cmake --build Build/Debug/ST -j`nproc`
+
+	cmake -B Build/Debug/MT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_COMPAT_ONLY=ON "${@}"
+	cmake --build Build/Debug/MT -j`nproc`
+
+	# Debuggable debug builds: separate-.wasm sidecars (jolt-physics.debug[.multithread].wasm.js
+	# + .wasm.wasm). The base64-embedded compat debug builds OOM bundlers (Vercel) and break
+	# Chrome C++ breakpoints, so ship a separate-.wasm sidecar for ST and MT.
+	cmake -B Build/Debug/SidecarST -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_SIDECAR_ONLY=ON "${@}"
+	cmake --build Build/Debug/SidecarST -j`nproc`
+
+	cmake -B Build/Debug/SidecarMT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_SIDECAR_ONLY=ON "${@}"
+	cmake --build Build/Debug/SidecarMT -j`nproc`
 fi
 
-cmake -B Build/$BUILD_TYPE/ST -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${@}"
-cmake --build Build/$BUILD_TYPE/ST -j`nproc`
+# Update the worker URL in the debug multithread bundle
+if [ -f ./dist/jolt-physics.debug.multithread.wasm-compat.js ]
+then
+	perl -i -pe "s:jolt-physics.multithread.wasm-compat.js:jolt-physics.debug.multithread.wasm-compat.js:g" ./dist/jolt-physics.debug.multithread.wasm-compat.js
+fi
 
-cmake -B Build/$BUILD_TYPE/MT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${@}"
-cmake --build Build/$BUILD_TYPE/MT -j`nproc`
-
-cat > ./dist/jolt-physics.d.ts << EOF
+# Per-flavor .d.ts wrappers — all reference the single types.d.ts (which contains
+# the most complete type set, including debug renderer, from the Debug build).
+make_dts() {
+	for flavor in "$@"; do
+		cat > "./dist/${flavor}.d.ts" << DTSEOF
 import Jolt from "./types";
 
 export default Jolt;
 export * from "./types";
 
-EOF
+DTSEOF
+	done
+}
 
-cp ./dist/jolt-physics.d.ts ./dist/jolt-physics.wasm.d.ts
-cp ./dist/jolt-physics.d.ts ./dist/jolt-physics.wasm-compat.d.ts
-cp ./dist/jolt-physics.d.ts ./dist/jolt-physics.multithread.d.ts
-cp ./dist/jolt-physics.d.ts ./dist/jolt-physics.multithread.wasm.d.ts
-cp ./dist/jolt-physics.d.ts ./dist/jolt-physics.multithread.wasm-compat.d.ts
-
-if [ $BUILD_TYPE != "Debug" ]
-then
-	cp ./dist/jolt-physics.d.ts ./dist/jolt-physics.debug.wasm.d.ts
-fi
+make_dts \
+	jolt-physics \
+	jolt-physics.wasm \
+	jolt-physics.wasm-compat \
+	jolt-physics.debug.wasm \
+	jolt-physics.debug.wasm-compat \
+	jolt-physics.multithread \
+	jolt-physics.multithread.wasm \
+	jolt-physics.multithread.wasm-compat \
+	jolt-physics.debug.multithread.wasm \
+	jolt-physics.debug.multithread.wasm-compat
 
 cp ./dist/jolt-physics*.wasm-compat.js ./Examples/js/

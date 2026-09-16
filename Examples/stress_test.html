@@ -5,56 +5,53 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<link rel="stylesheet" type="text/css" href="style.css">
+		<script type="importmap">
+		{
+			"imports": {
+				"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+			}
+		}
+		</script>
 	</head>
 	<body>
 		<div id="container">Loading...</div>
-		<div id="info">JoltPhysics.js stress test demo</div>
-
-		<script src="js/three/three.min.js"></script>
-		<script src="js/three/OrbitControls.js"></script>
-		<script src="js/three/WebGL.js"></script>
-		<script src="js/three/stats.min.js"></script>
-		<script src="js/example.js"></script>
+		<div id="info">JoltPhysics.js stress test<br/>
+		A pyramid of boxes with a heavy box dropped on top</div>
 
 		<script type="module">
-			// In case you haven't built the library yourself, replace URL with: https://www.unpkg.com/jolt-physics/dist/jolt-physics.wasm-compat.js
-			import initJolt from './js/jolt-physics.wasm-compat.js';
+			import initJolt from '../dist/jolt-physics.wasm-compat.js';
+			import * as Example from './js/example.js';
+			import { initExample, createFloor, addToScene, LAYER_MOVING } from './js/example.js';
 
-			initJolt().then(function (Jolt) {
-				let towerHeight = 11;
+			const Jolt = await initJolt();
+			let towerHeight = 11;
 
-				// Initialize this example
-				initExample(Jolt, null);
+			initExample(Jolt, null);
+			const bodyInterface = Example.bodyInterface;
 
-				// Create a basic floor
-				createFloor();
+			createFloor();
 
-				// Create pyramid
-				let material = new THREE.MeshPhongMaterial({ color: 0xffffff });
-				let geometry = new THREE.BoxGeometry(1, 1, 1);
-				let shape = new Jolt.BoxShape(new Jolt.Vec3(0.5, 0.5, 0.5), 0.05, null);
-				let creationSettings = new Jolt.BodyCreationSettings(shape, Jolt.RVec3.prototype.sZero(), Jolt.Quat.prototype.sIdentity(), Jolt.EMotionType_Dynamic, LAYER_MOVING);
+			let shape = new Jolt.BoxShape([0.5, 0.5, 0.5]);
+			let creationSettings = new Jolt.BodyCreationSettings(shape, [0, 0, 0], [0, 0, 0, 1], Jolt.EMotionType.Dynamic, LAYER_MOVING);
 
-				for (let y = 0; y < towerHeight; y++) {
+			for (let y = 0; y < towerHeight; y++) {
 
-					let baseOffset = towerHeight - 1 - y;
+				let baseOffset = towerHeight - 1 - y;
 
-					for (let x = -baseOffset; x <= baseOffset; x++) {
-						for (let z = -baseOffset; z <= baseOffset; z++) {
-							creationSettings.mPosition = new Jolt.RVec3(x, y + 0.5, z);
-							let body = bodyInterface.CreateBody(creationSettings);
+				for (let x = -baseOffset; x <= baseOffset; x++) {
+					for (let z = -baseOffset; z <= baseOffset; z++) {
+						creationSettings.mPosition = [x, y + 0.5, z];
+						let body = bodyInterface.CreateBody(creationSettings);
 
-							addToScene(body, 0xffffff);
-						}
+						addToScene(body, 0xffffff);
 					}
 				}
+			}
 
-				// Create block to fall on scene
-				shape = new Jolt.BoxShape(new Jolt.Vec3(1, 1, 1), 0.05, null);
-				let body = bodyInterface.CreateBody(new Jolt.BodyCreationSettings(shape, new Jolt.RVec3(0, 20, 0), Jolt.Quat.prototype.sIdentity(), Jolt.EMotionType_Dynamic, LAYER_MOVING));
-				addToScene(body, 0xff0000);
-			});
-
+			shape = new Jolt.BoxShape([1, 1, 1]);
+			let body = bodyInterface.CreateBody(new Jolt.BodyCreationSettings(shape, [0, 20, 0], [0, 0, 0, 1], Jolt.EMotionType.Dynamic, LAYER_MOVING));
+			addToScene(body, 0xff0000);
 		</script>
 	</body>
 </html>
