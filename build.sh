@@ -20,6 +20,13 @@ then
 	cmake -B Build/$BUILD_TYPE/ST -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${@}"
 	cmake --build Build/$BUILD_TYPE/ST -j`nproc`
 
+	# Multi-threaded release flavour. Not used by Nilo (Jolt's MT build doesn't work with JS
+	# callbacks) but Examples/{conveyor_belt,stress_test}_threaded.html import
+	# dist/jolt-physics.multithread.wasm-compat.js, so the demos need it built. Debug MT is
+	# deliberately NOT built — nothing imports it and it cost ~30 MB per build.
+	cmake -B Build/$BUILD_TYPE/MT -DENABLE_MULTI_THREADING=ON -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE "${@}"
+	cmake --build Build/$BUILD_TYPE/MT -j`nproc`
+
 	cmake -B Build/Debug/ST -DENABLE_SIMD=ON -DCMAKE_BUILD_TYPE=Debug -DBUILD_WASM_COMPAT_ONLY=ON "${@}"
 	cmake --build Build/Debug/ST -j`nproc`
 
@@ -57,6 +64,8 @@ make_dts \
 	jolt-physics.wasm \
 	jolt-physics.wasm-compat \
 	jolt-physics.debug.wasm \
-	jolt-physics.debug.wasm-compat
+	jolt-physics.debug.wasm-compat \
+	jolt-physics.multithread.wasm \
+	jolt-physics.multithread.wasm-compat
 
 cp ./dist/jolt-physics*.wasm-compat.js ./Examples/js/

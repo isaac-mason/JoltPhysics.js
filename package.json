@@ -26,7 +26,16 @@
 			"types": "./dist/jolt-physics.debug.wasm-compat.d.ts",
 			"default": "./dist/jolt-physics.debug.wasm-compat.js"
 		},
+		"./wasm-multithread": {
+			"types": "./dist/jolt-physics.multithread.wasm.d.ts",
+			"default": "./dist/jolt-physics.multithread.wasm.js"
+		},
+		"./wasm-compat-multithread": {
+			"types": "./dist/jolt-physics.multithread.wasm-compat.d.ts",
+			"default": "./dist/jolt-physics.multithread.wasm-compat.js"
+		},
 		"./jolt-physics.wasm.wasm": "./dist/jolt-physics.wasm.wasm",
+		"./jolt-physics.multithread.wasm.wasm": "./dist/jolt-physics.multithread.wasm.wasm",
 		"./jolt-physics.debug.wasm.wasm": "./dist/jolt-physics.debug.wasm.wasm",
 		"./package.json": "./package.json"
 	},
@@ -57,11 +66,18 @@
 		"./dist/jolt-physics.debug.wasm.js",
 		"./dist/jolt-physics.debug.wasm.d.ts",
 		"./dist/jolt-physics.debug.wasm.wasm",
+		"./dist/jolt-physics.multithread.wasm-compat.js",
+		"./dist/jolt-physics.multithread.wasm-compat.d.ts",
+		"./dist/jolt-physics.multithread.wasm.js",
+		"./dist/jolt-physics.multithread.wasm.d.ts",
+		"./dist/jolt-physics.multithread.wasm.wasm",
 		"./dist/types.d.ts",
 		"wasm",
 		"wasm-compat",
 		"debug-wasm",
-		"debug-wasm-compat"
+		"debug-wasm-compat",
+		"wasm-multithread",
+		"wasm-compat-multithread"
 	],
 	"keywords": [
 		"physics",
