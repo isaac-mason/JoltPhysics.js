@@ -240,6 +240,7 @@ try {
             "-DCMAKE_BUILD_TYPE=$Variant",
             "-DBUILD_WASM_COMPAT_ONLY=$compatOnly",
             "-DENABLE_MULTI_THREADING=OFF",
+            "-DENABLE_SIMD=ON",
             "-DJPH_DEV_FAST_LINK=$fastLinkArg",
             $joltArg
         )

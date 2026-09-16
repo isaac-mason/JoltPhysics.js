@@ -94,11 +94,10 @@ Go to the [demos page](https://jrouwe.github.io/JoltPhysics.js/) to see the proj
 
 ## Using
 
-This library comes in 6 flavours:
+This library comes in 5 flavours:
 - `wasm-compat` - A WASM version with the WASM file (encoded in base64) embedded in the bundle
 - `wasm` - A WASM version with a separate WASM file
 - `debug-wasm` - Same as `wasm` but compiled with DWARF + assertions for C++ source-level debugging (see Nilo-fork section above for why this replaces upstream's `debug-wasm-compat`).
-- `asm` - A JavaScript version that uses [asm.js](https://developer.mozilla.org/en-US/docs/Games/Tools/asm.js)
 - `wasm-compat-multithread` - Same as `wasm-compat` but with multi threading enabled.
 - `wasm-multithread` - Same as `wasm` but with multi threading enabled.
 
@@ -132,9 +131,6 @@ import Jolt from 'jolt-physics/wasm';
 
 // WASM with DWARF + assertions for C++ source-level debugging (separate .wasm sidecar)
 import Jolt from 'jolt-physics/debug-wasm';
-
-// asm.js
-import Jolt from 'jolt-physics/asm';
 
 // WASM embedded in the bundle, multithread enabled
 import Jolt from 'jolt-physics/wasm-compat-multithread';

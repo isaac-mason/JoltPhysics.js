@@ -193,13 +193,6 @@ if (SAFE_HEAP)
 	set(EMCC_ARGS ${EMCC_ARGS} -s SAFE_HEAP=1)
 endif()
 
-set(EMCC_JS_ARGS ${EMCC_ARGS}
-  -s AGGRESSIVE_VARIABLE_ELIMINATION=1
-  -s ELIMINATE_DUPLICATE_FUNCTIONS=1
-  -s SINGLE_FILE=1
-  -s LEGACY_VM_SUPPORT=1
-  -s WASM=0)
-
 # NOTE: -s BINARYEN_IGNORE_IMPLICIT_TRAPS=1 was removed — it assumes memory ops
 # never trap and, at -O3, corrupts embind's value_object marshalling (Vec3 write
 # -> "memory access out of bounds"). Harmless with the old WebIDL glue; not with embind.
@@ -267,18 +260,6 @@ endif()
 
 # ---- flavor outputs ----
 if (NOT BUILD_WASM_COMPAT_ONLY)
-	if (NOT ENABLE_MULTI_THREADING     # Not compatible with multi threading (atomic store not implemented)
-		AND NOT ENABLE_SIMD            # Not compatible with SIMD (unhandled unaligned load)
-		AND NOT BUILD_WASM_SIDECAR_ONLY)   # sidecar-only build emits just the .wasm sidecar
-		add_custom_command(
-			OUTPUT ${OUTPUT_BASE_NAME}.js
-			COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_JS_ARGS} -o ${OUTPUT_BASE_NAME}.js
-			DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
-			COMMENT "Building JoltPhysics.js javascript"
-			VERBATIM)
-		add_custom_target(jolt-javascript ALL DEPENDS ${OUTPUT_BASE_NAME}.js)
-	endif()
-
 	add_custom_command(
 		OUTPUT ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm
 		COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js

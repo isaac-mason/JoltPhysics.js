@@ -235,11 +235,12 @@ try {
             Remove-Item -Recurse -Force "Build\Debug\ST"
         }
         Write-Host "=== Preamble: Debug non-compat ST (jolt-physics.debug.wasm.{js,wasm}) ==="
-        # --target jolt-wasm so the preamble doesn't also build jolt-javascript (75 MB debug asm.js
-        # we don't ship) or jolt-wasm-compat (the variant whose DevTools-crash behaviour is the
-        # whole reason this preamble exists). Saves ~30-60 s of closure link time per skipped target.
+        # --target jolt-wasm so the preamble doesn't also build jolt-wasm-compat (the variant whose
+        # DevTools-crash behaviour is the whole reason this preamble exists). Saves ~30-60 s of
+        # closure link time.
         Invoke-EmcmakeBuild -BuildDir "Build/Debug/ST" -CMakeBuildType "Debug" -ExtraCmakeArgs @(
             "-DBUILD_WASM_COMPAT_ONLY=OFF",
+            "-DENABLE_SIMD=ON",
             "-DJPH_OUTPUT_NAME_SUFFIX=.debug"
         ) -Target "jolt-wasm"
         if (-not (Test-Path "dist\jolt-physics.debug.wasm.js")) {
@@ -255,7 +256,9 @@ try {
     # under the Release name, no .debug.* artifacts produced, and dist/ is NOT publish-ready. Use
     # -BuildType Distribution (default) for a publish-quality dist with both Release + Debug artifacts.
     Write-Host "=== Primary: $BuildType ST + MT (full npm dist) ==="
-    Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/ST" -CMakeBuildType $BuildType -ExtraCmakeArgs @()
+    Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/ST" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
+        "-DENABLE_SIMD=ON"
+    )
     Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/MT" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
         "-DENABLE_MULTI_THREADING=ON",
         "-DENABLE_SIMD=ON"
@@ -263,15 +266,13 @@ try {
 
     # --- d.ts shims (one canonical file, copied to each entrypoint's expected name) ---
     $dts = "import Jolt from ""./types"";`n`nexport default Jolt;`nexport * from ""./types"";`n`n"
-    Set-Content -Path "dist\jolt-physics.d.ts" -Value $dts -Encoding utf8
     foreach ($name in @(
             "jolt-physics.wasm.d.ts",
             "jolt-physics.wasm-compat.d.ts",
             "jolt-physics.debug.wasm.d.ts",
-            "jolt-physics.multithread.d.ts",
             "jolt-physics.multithread.wasm.d.ts",
             "jolt-physics.multithread.wasm-compat.d.ts")) {
-        Copy-Item -Force "dist\jolt-physics.d.ts" "dist\$name"
+        Set-Content -Path "dist\$name" -Value $dts -Encoding utf8
     }
 
     $ex = Join-Path $here "Examples\js"
@@ -280,17 +281,20 @@ try {
     }
 
     # Defensive cleanup: drop wasm-compat debug artifacts that older publish builds (<= nilo.2)
-    # produced, and the debug asm.js variant the jolt-javascript target would emit if the Debug
-    # preamble built without --target (we no longer do, but a developer re-running an older
-    # iteration of this script could have left these behind). If they're left in dist/ they don't
-    # ship (not in package.json files), but they confuse `npm pack --dry-run` output.
+    # produced, plus the asm.js flavour we no longer build at all (the jolt-javascript target is
+    # gone now that ST builds with SIMD). A developer with an older checkout can have these left
+    # behind. If they're left in dist/ they don't ship (not in package.json files), but they
+    # confuse `npm pack --dry-run` output.
     foreach ($stale in @(
             "dist\jolt-physics.debug.wasm-compat.js",
             "dist\jolt-physics.debug.wasm-compat.d.ts",
             "dist\jolt-physics.debug.multithread.wasm-compat.js",
             "dist\jolt-physics.debug.multithread.wasm-compat.d.ts",
             "dist\jolt-physics.debug.js",
-            "dist\jolt-physics.debug.d.ts")) {
+            "dist\jolt-physics.debug.d.ts",
+            "dist\jolt-physics.js",
+            "dist\jolt-physics.d.ts",
+            "dist\jolt-physics.multithread.d.ts")) {
         if (Test-Path -LiteralPath $stale) {
             Write-Host "Cleanup: removing stale $stale (no longer shipped)"
             Remove-Item -Force -LiteralPath $stale
@@ -300,8 +304,6 @@ try {
     # Validate dist matches package.json "files" (dist entries + types.d.ts).
     # Debug-named artifacts only exist when a Debug-non-compat preamble ran (i.e. BuildType != Debug).
     $requiredDist = @(
-        "dist\jolt-physics.js",
-        "dist\jolt-physics.d.ts",
         "dist\jolt-physics.wasm-compat.js",
         "dist\jolt-physics.wasm-compat.d.ts",
         "dist\jolt-physics.wasm.js",
