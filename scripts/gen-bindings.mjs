@@ -160,20 +160,17 @@ function stripInternal(src) {
 const FACADE_TYPES = `
 export type Contact = {
   body1: number; body2: number; subShape1: number; subShape2: number;
-  normal: Vec3; penetration: number; isNew: boolean; pointCount: number;
+  normal: Vec3; penetration: number; pointCount: number;
 };
 export type ContactPoint = { on1: Vec3; on2: Vec3 };
 export type RemovedContact = { body1: number; subShape1: number; body2: number; subShape2: number };
-/** Buffered contact events — zero-allocation bulk reads (see ContactListenerBuffer). */
+/** Buffered contact events — zero-allocation bulk reads (see ContactListenerBuffer). Operated via the
+ * module-level contact-buffer functions on JoltFacade below (clearContactBuffer / updateContactBuffer /
+ * getContactBuffer*At / destroyContactBuffer), not instance methods. */
 export interface ContactBuffer {
-  readonly contactCount: number;
+  readonly addedCount: number;
+  readonly persistedCount: number;
   readonly removedCount: number;
-  clear(): void;    // before Step
-  refresh(): void;  // after Step
-  getContact(out: Contact, index: number): Contact;
-  getPoint(out: ContactPoint, contact: Contact, pointIndex: number): ContactPoint;
-  getRemoved(out: RemovedContact, index: number): RemovedContact;
-  destroy(): void;
 }
 export type ActiveBodyState = {
   id: number;
@@ -188,6 +185,13 @@ export interface ActiveBodyBufferHandle {
 }
 export interface JoltFacade {
   createContactBuffer(physicsSystem: PhysicsSystem): ContactBuffer;
+  clearContactBuffer(buffer: ContactBuffer): void;    // before Step
+  updateContactBuffer(buffer: ContactBuffer): void;   // after Step
+  getContactBufferAddedAt(buffer: ContactBuffer, out: Contact, index: number): Contact;
+  getContactBufferPersistedAt(buffer: ContactBuffer, out: Contact, index: number): Contact;
+  getContactBufferRemovedAt(buffer: ContactBuffer, out: RemovedContact, index: number): RemovedContact;
+  getContactBufferPointAt(buffer: ContactBuffer, out: ContactPoint, contact: Contact, pointIndex: number): ContactPoint;
+  destroyContactBuffer(buffer: ContactBuffer): void;
   createContact(): Contact;
   createContactPoint(): ContactPoint;
   createRemovedContact(): RemovedContact;
