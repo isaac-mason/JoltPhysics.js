@@ -8,12 +8,12 @@
     dist\jolt-physics.debug.wasm.wasm without colliding with the Release outputs; then a full Distribution ST+MT
     build is run for the standard npm dist outputs; then d.ts shims and Examples/js copy.
 
-    The Nilo fork no longer ships the single-threaded wasm-compat debug variant (debug-wasm-compat); the
-    multi-threaded one (debug-wasm-compat-multithread) is still exported. Compat debug builds embed a
-    multi-MB base64 WASM blob in JS, which crashes Chrome DevTools
+    Prefer the non-compat debug builds (debug-wasm / debug-wasm-multithread) for C++ debugging: the
+    wasm-compat debug variants embed a multi-MB base64 WASM blob in JS, which crashes Chrome DevTools
     when setting C++ breakpoints (the DWARF extension can't keep all three of: WASM bytes, JS source, and DWARF
     index resident at once). The non-compat debug build keeps JS glue ~1 MB and exposes WASM as a first-class
-    binary, which DevTools handles natively.
+    binary, which DevTools handles natively. The compat debug variants are still shipped as entry points
+    for hosts that can't serve a separate .wasm sidecar.
 
     The resulting dist/ is suitable for a single npm publish (release + debug entrypoints together).
 
@@ -280,16 +280,16 @@ try {
         Copy-Item -Force "dist\jolt-physics*.wasm-compat.js" $ex
     }
 
-    # Defensive cleanup: drop wasm-compat debug artifacts that older publish builds (<= nilo.2)
-    # produced, plus the asm.js flavour we no longer build at all (the jolt-javascript target is
-    # gone now that ST builds with SIMD). A developer with an older checkout can have these left
-    # behind. If they're left in dist/ they don't ship (not in package.json files), but they
-    # confuse `npm pack --dry-run` output.
+    # Defensive cleanup: drop the asm.js flavour we no longer build at all (the jolt-javascript
+    # target is gone now that ST builds with SIMD), plus debug artifacts older publish builds
+    # (<= nilo.2) produced under names we no longer use. A developer with an older checkout can
+    # have these left behind. If they're left in dist/ they don't ship (not in package.json
+    # files), but they confuse `npm pack --dry-run` output.
+    #
+    # NOTE: the *.wasm-compat debug artifacts are NOT listed here — both debug-wasm-compat and
+    # debug-wasm-compat-multithread are exported entry points, so deleting them would leave a
+    # Windows-built package with dangling exports.
     foreach ($stale in @(
-            "dist\jolt-physics.debug.wasm-compat.js",
-            "dist\jolt-physics.debug.wasm-compat.d.ts",
-            "dist\jolt-physics.debug.multithread.wasm-compat.js",
-            "dist\jolt-physics.debug.multithread.wasm-compat.d.ts",
             "dist\jolt-physics.debug.js",
             "dist\jolt-physics.debug.d.ts",
             "dist\jolt-physics.js",
