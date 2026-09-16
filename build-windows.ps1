@@ -8,8 +8,9 @@
     dist\jolt-physics.debug.wasm.wasm without colliding with the Release outputs; then a full Distribution ST+MT
     build is run for the standard npm dist outputs; then d.ts shims and Examples/js copy.
 
-    The Nilo fork no longer ships the wasm-compat debug variants (debug-wasm-compat /
-    debug-wasm-compat-multithread). They embed a multi-MB base64 WASM blob in JS, which crashes Chrome DevTools
+    The Nilo fork no longer ships the single-threaded wasm-compat debug variant (debug-wasm-compat); the
+    multi-threaded one (debug-wasm-compat-multithread) is still exported. Compat debug builds embed a
+    multi-MB base64 WASM blob in JS, which crashes Chrome DevTools
     when setting C++ breakpoints (the DWARF extension can't keep all three of: WASM bytes, JS source, and DWARF
     index resident at once). The non-compat debug build keeps JS glue ~1 MB and exposes WASM as a first-class
     binary, which DevTools handles natively.
