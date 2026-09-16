@@ -73,8 +73,8 @@ function labelTupleElements(src) {
 // BodyInterface) have different signatures, so a method-name-only map would cross them.
 function applyOutParamTypes(src) {
   const byClass = {};
-  for (const { cls, method, names, outTs, passTs, retTs } of outMeta)
-    (byClass[cls] ??= {})[method] = { names, outTs, passTs, retTs };
+  for (const { cls, method, names, nameTs, outTs, passTs, retTs } of outMeta)
+    (byClass[cls] ??= {})[method] = { names, nameTs, outTs, passTs, retTs };
   if (!/\w+Into\(/.test(src)) warn('no *Into out-param methods found');
   const seen = new Set();
   let cls = null;
@@ -84,10 +84,12 @@ function applyOutParamTypes(src) {
     // A value-returning out_function renders `...Into(...): T`, not `: void` — match any return.
     const m = cls && byClass[cls] && line.match(/^(\s*)(\w+)Into\([^)]*\): [^;]+;\s*$/);
     if (m && byClass[cls][m[2]]) {
-      const { names, outTs, passTs, retTs } = byClass[cls][m[2]];
+      const { names, nameTs, outTs, passTs, retTs } = byClass[cls][m[2]];
       seen.add(`${cls}.${m[2]}`);
       const paramTypes = [...outTs, ...passTs]; // positional: out slots then passes
-      const params = names.map((n, i) => `${n}: ${paramTypes[i]}`).join(', ');
+      // A `name: Type` annotation in the DSL sig wins — a Pass arg that is really a class handle
+      // would otherwise take its tag's type ("number"), which lies about what the binding accepts.
+      const params = names.map((n, i) => `${n}: ${(nameTs && nameTs[i]) || paramTypes[i]}`).join(', ');
       // retTs (value-returning) wins; else single out returns itself, multi returns a tuple.
       const ret = retTs || (outTs.length === 1 ? outTs[0] : `[${outTs.join(', ')}]`);
       return `${m[1]}${m[2]}(${params}): ${ret};`;

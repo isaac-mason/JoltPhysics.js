@@ -128,8 +128,11 @@ static inline JPH::Mat44 mkMat44(float m0, float m1, float m2, float m3, float m
 // `names` are the public param names (out slots then passes, in order); `sizes`/`outTs` the
 // float count + TS type of each out slot; `passKinds`/`passTs` the facade unpack kind and public
 // TS type of each forwarded input arg. Drives both the facade reader codegen and the .d.ts.
-struct OutEntry  { std::string cls, method; std::vector<std::string> names; std::vector<int> sizes;
-    std::vector<std::string> outTs, passKinds, passTs; std::string retTs; };  // retTs: for a value-returning
+struct OutEntry  { std::string cls, method; std::vector<std::string> names, nameTs; std::vector<int> sizes;
+    std::vector<std::string> outTs, passKinds, passTs; std::string retTs; };  // nameTs: optional per-param TS
+    // type from a `"Method(out, ray: RRayCast)"` annotation, positional against names; empty => use the
+    // descriptor's type. Needed where a Pass arg is a class handle, not the scalar its tag implies.
+    // retTs: for a value-returning
     // out_function (lambda returns a value in ADDITION to writing out-params), the TS return type from a
     // `"Method(...): T"` annotation. Empty => reader returns the out (single) or out-tuple (multi).
 struct CtorParam { std::string name, tsType; };   // tsType empty => embind infers the type
@@ -237,11 +240,13 @@ template<typename Tag> void appendDesc(DescMeta& m, pass_t<Tag>) { m.passes.push
 template<typename... Ds> DescMeta collectDesc() { DescMeta m; (appendDesc(m, Ds{}), ...); return m; }
 
 // ---- signature parsing ----
-// One parse of a DSL sig "Method(out, comTransform, scale): boolean" into its three parts: method,
-// params (the public param names — out slots then passes, positional) and retTs (the optional
-// return-type annotation, empty if none). A no-parens sig ("Foo: number[]") yields method + retTs
-// and empty params. Params never contain a top-level ':', so the return colon is unambiguous.
-struct SigInfo { std::string method; std::vector<std::string> params; std::string retTs; };
+// One parse of a DSL sig "Method(out, comTransform, scale): boolean" into its parts: method,
+// params (the public param names — out slots then passes, positional), paramTs (an optional
+// per-param TS type, same `name: Type` spelling the .constructor DSL uses; empty => take the
+// descriptor's type) and retTs (the optional return-type annotation, empty if none). A no-parens
+// sig ("Foo: number[]") yields method + retTs and empty params. The return colon is read only from
+// after ')', so per-param colons inside the parens stay unambiguous.
+struct SigInfo { std::string method; std::vector<std::string> params, paramTs; std::string retTs; };
 inline SigInfo parseSig(const char* sig) {
     auto trim = [](std::string s) -> std::string {
         size_t a = s.find_first_not_of(" \t");
@@ -254,14 +259,10 @@ inline SigInfo parseSig(const char* sig) {
     out.method = trim(methodEnd ? std::string(sig, methodEnd) : std::string(sig));
     if (const char* colon = strchr(rp ? rp + 1 : sig, ':')) out.retTs = trim(colon + 1);
     if (lp && rp) {
-        std::string inner(lp + 1, rp);
-        size_t i = 0;
-        while (i <= inner.size()) {
-            size_t c = inner.find(',', i);
-            if (c == std::string::npos) c = inner.size();
-            std::string tok = trim(inner.substr(i, c - i));
-            if (!tok.empty()) out.params.push_back(tok);
-            i = c + 1;
+        // Same splitter the .constructor DSL uses, so `name: Type` means the same thing in both.
+        for (auto& p : splitParams(std::string(lp + 1, rp).c_str())) {
+            out.params.push_back(std::move(p.name));
+            out.paramTs.push_back(std::move(p.tsType));
         }
     }
     return out;
@@ -330,7 +331,8 @@ struct jolt_class_ {
         // Binding-site metadata for the facade reader codegen + .d.ts (published by _outMeta).
         out_desc::DescMeta meta = out_desc::collectDesc<Descs...>();
         OutEntry e;
-        e.cls = name_; e.method = si.method; e.names = std::move(si.params); e.retTs = std::move(si.retTs);
+        e.cls = name_; e.method = si.method; e.names = std::move(si.params);
+        e.nameTs = std::move(si.paramTs); e.retTs = std::move(si.retTs);
         e.sizes = std::move(meta.sizes); e.outTs = std::move(meta.outTs);
         for (const auto& p : meta.passes) { e.passKinds.push_back(p.jsKind); e.passTs.push_back(p.tsType); }
         sOutRegistry.push_back(std::move(e));
@@ -1966,9 +1968,9 @@ EMSCRIPTEN_BINDINGS(jolt) {
     // Contact query interface passed into OnSoftBodyContactAdded (non-owning handle only).
     jolt_class_<SoftBodyManifold>("SoftBodyManifold")
         .function("HasContact(vertex)",           +[](const SoftBodyManifold &m, const SoftBodyVertex &v) { return m.HasContact(v); }, allow_raw_pointers())
-        .out_function("GetLocalContactPoint(out, vertex)", out_desc::Vec3, out_desc::Pass,
+        .out_function("GetLocalContactPoint(out, vertex: SoftBodyVertex)", out_desc::Vec3, out_desc::Pass,
             +[](const SoftBodyManifold &m, uintptr_t out, const SoftBodyVertex &v) { WriteVec3(m.GetLocalContactPoint(v), out); })
-        .out_function("GetContactNormal(out, vertex)", out_desc::Vec3, out_desc::Pass,
+        .out_function("GetContactNormal(out, vertex: SoftBodyVertex)", out_desc::Vec3, out_desc::Pass,
             +[](const SoftBodyManifold &m, uintptr_t out, const SoftBodyVertex &v) { WriteVec3(m.GetContactNormal(v), out); })
         .function("GetContactBodyID(vertex)",     +[](const SoftBodyManifold &m, const SoftBodyVertex &v) { return (uint32)m.GetContactBodyID(v).GetIndexAndSequenceNumber(); }, allow_raw_pointers())
         .function("GetNumSensorContacts",         +[](const SoftBodyManifold &m) { return (uint32)m.GetNumSensorContacts(); })
@@ -2585,7 +2587,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
         .function("GetBroadPhaseQuery",
             +[](PhysicsSystem &ps) { return const_cast<BroadPhaseQuery *>(&ps.GetBroadPhaseQuery()); }, allow_raw_pointers())
         // world-space surface normal at a raycast hit (locks the body internally).
-        .out_function("GetRayHitNormal(out, ray, hit)",
+        .out_function("GetRayHitNormal(out, ray: RRayCast, hit: RayCastResult)",
             out_desc::Vec3, out_desc::Pass, out_desc::Pass, +[](PhysicsSystem &ps, uintptr_t out, const RRayCast &ray, const RayCastResult &hit) {
                 Vec3 n = Vec3::sZero();
                 BodyLockRead lock(ps.GetBodyLockInterfaceNoLock(), hit.mBodyID);
@@ -4198,8 +4200,9 @@ EMSCRIPTEN_BINDINGS(jolt) {
     // reads them straight off a probe module in-process, and the shipped runtime never decodes a
     // string over growable wasm memory (which TextDecoder rejects in the browser).
     //
-    // _outMeta: array of {cls, method, names:[...], sizes:[N], outTs:[...], passKinds:[...], passTs:[...]}
-    // where names is the public param list (out slots then passes, in order).
+    // _outMeta: array of {cls, method, names:[...], nameTs:[...], sizes:[N], outTs:[...], passKinds:[...],
+    // passTs:[...]} where names is the public param list (out slots then passes, in order) and nameTs
+    // the positional per-param TS overrides ("" => use the descriptor's type).
     emscripten::function("_outMeta", +[]() -> val {
         auto toStrArray = [](const std::vector<std::string>& v) {
             val a = val::array();
@@ -4211,6 +4214,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
             val o = val::object();
             o.set("cls", e.cls); o.set("method", e.method);
             o.set("names", toStrArray(e.names));
+            o.set("nameTs", toStrArray(e.nameTs));
             val sizes = val::array();
             for (int s : e.sizes) sizes.call<void>("push", s);
             o.set("sizes", sizes);
