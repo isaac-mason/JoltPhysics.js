@@ -14,7 +14,7 @@ Clone these as **siblings** under one parent (e.g. `C:\dev`); build scripts auto
 |---|---|---|
 | `JoltPhysics.js/` (this repo) | `nilo-technologies/JoltPhysics.js` | branch `nilo` |
 | `JoltPhysics/` | `nilo-technologies/JoltPhysics` | C++ Jolt fork; tag `nilo-v5.5.0` |
-| `emsdk/` | `emscripten-core/emsdk` | `emsdk install latest && emsdk activate latest` |
+| `emsdk/` | `emscripten-core/emsdk` | `emsdk install 6.0.9 && emsdk activate 6.0.9` — **must match `ci/install-emsdk.sh`**; `latest` will drift from CI |
 | `Nilo/` | _private_ | the consumer |
 
 Both Jolt repos use paired `nilo-vX.Y.Z` tags where `X.Y.Z` matches the upstream Jolt C++ API line. Build scripts default to `nilo-v5.5.0`; override with `$env:NILO_JOLT_TAG`.
@@ -94,13 +94,13 @@ Go to the [demos page](https://jrouwe.github.io/JoltPhysics.js/) to see the proj
 
 ## Using
 
-This library comes in 6 flavours:
+This library comes in 4 flavours:
 - `wasm-compat` - A WASM version with the WASM file (encoded in base64) embedded in the bundle
 - `wasm` - A WASM version with a separate WASM file
 - `debug-wasm` - Same as `wasm` but compiled with DWARF + assertions for C++ source-level debugging. Prefer this over `debug-wasm-compat` (see the Nilo-fork section above).
 - `debug-wasm-compat` - Same as `wasm-compat` but compiled with DWARF + assertions. The embedded base64 WASM blob can crash Chrome DevTools when setting C++ breakpoints, so only use it where a separate `.wasm` file can't be served.
-- `wasm-compat-multithread` - Same as `wasm-compat` but with multi threading enabled.
-- `wasm-multithread` - Same as `wasm` but with multi threading enabled.
+
+The Nilo fork does not ship the multi-threaded flavours: Jolt's multi-threaded build does not work with JS callbacks (contact listeners, character callbacks), which Nilo relies on. Build them locally with `-DENABLE_MULTI_THREADING=ON` if you need them.
 
 See [falling_shapes.html](Examples/falling_shapes.html) for an example on how to use the library.
 
@@ -132,12 +132,6 @@ import Jolt from 'jolt-physics/wasm';
 
 // WASM with DWARF + assertions for C++ source-level debugging (separate .wasm sidecar)
 import Jolt from 'jolt-physics/debug-wasm';
-
-// WASM embedded in the bundle, multithread enabled
-import Jolt from 'jolt-physics/wasm-compat-multithread';
-
-// WASM, multithread enabled
-import Jolt from 'jolt-physics/wasm-multithread';
 ```
 
 ### Using the WASM flavour
