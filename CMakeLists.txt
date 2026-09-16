@@ -252,6 +252,19 @@ add_custom_command(
 	VERBATIM)
 add_custom_target(jolt-typing ALL DEPENDS ${JOLT_TYPING} ${JOLT_POST_GENERATED})
 
+# multi-threaded.js references the worker module via a `replace_by_import(...)` placeholder so a
+# raw dynamic import() survives the emscripten/closure JS pipeline (see JoltPhysics.js issue #245).
+# Swap it back to a real `import` in the final bundles. Both the single-file compat build AND the
+# separate-.wasm sidecar carry the multi-threaded.js post-js on MT builds, so BOTH need the fixup;
+# there is exactly one occurrence (the call) in each, so a bare-word replace is safe.
+if (ENABLE_MULTI_THREADING)
+	set(FIXUP_IMPORT_COMMAND         COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm-compat.js)
+	set(FIXUP_IMPORT_SIDECAR_COMMAND COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm.js)
+else()
+	set(FIXUP_IMPORT_COMMAND "")
+	set(FIXUP_IMPORT_SIDECAR_COMMAND "")
+endif()
+
 # ---- flavor outputs ----
 if (NOT BUILD_WASM_COMPAT_ONLY)
 	if (NOT ENABLE_MULTI_THREADING     # Not compatible with multi threading (atomic store not implemented)
@@ -269,20 +282,11 @@ if (NOT BUILD_WASM_COMPAT_ONLY)
 	add_custom_command(
 		OUTPUT ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm
 		COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
+		${FIXUP_IMPORT_SIDECAR_COMMAND}
 		DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 		COMMENT "Building JoltPhysics.js webassembly"
 		VERBATIM)
 	add_custom_target(jolt-wasm ALL DEPENDS ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm)
-endif()
-
-# multi-threaded.js references the worker module via a `replace_by_import(...)`
-# placeholder so a raw dynamic import() survives the emscripten/closure JS pipeline
-# (see JoltPhysics.js issue #245). Swap it back to a real `import` in the final bundle.
-# There is exactly one occurrence (the call), so a bare-word replace is safe.
-if (ENABLE_MULTI_THREADING)
-	set(FIXUP_IMPORT_COMMAND COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm-compat.js)
-else()
-	set(FIXUP_IMPORT_COMMAND "")
 endif()
 
 if (NOT BUILD_WASM_SIDECAR_ONLY)
