@@ -1390,8 +1390,8 @@ EMSCRIPTEN_BINDINGS(jolt) {
                 float m8, float m9, float m10, float m11, float m12, float m13, float m14, float m15, float sx, float sy, float sz) {
                 Mat44 comTransform = mkMat44(m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15); Vec3 scale = mkVec3(sx, sy, sz);
                 WriteAABox(s.GetWorldSpaceBounds(comTransform, scale), out); })
-        .function("GetUserData", +[](const Shape &s) { return (uint32)s.GetUserData(); })
-        .function("SetUserData(userData)", +[](Shape &s, uint32 userData) { s.SetUserData(userData); })
+        .function("GetUserData", +[](const Shape &s) { return (uint64)s.GetUserData(); })
+        .function("SetUserData(userData)", +[](Shape &s, uint64 userData) { s.SetUserData(userData); })
         .function("GetSubShapeIDBitsRecursive", &Shape::GetSubShapeIDBitsRecursive)
         .function("GetInnerRadius", &Shape::GetInnerRadius)
         .function("GetLeafShape(subShapeID)",
@@ -1406,7 +1406,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
                 Vec3 localSurfacePosition = mkVec3(px, py, pz);
                 WriteVec3(s.GetSurfaceNormal(toSubShapeID(subShapeID), localSurfacePosition), out); })
         .function("GetSubShapeUserData(subShapeID)",
-            +[](const Shape &s, uint32 subShapeID) { return (uint32)s.GetSubShapeUserData(toSubShapeID(subShapeID)); })
+            +[](const Shape &s, uint32 subShapeID) { return (uint64)s.GetSubShapeUserData(toSubShapeID(subShapeID)); })
         .function("GetStats: { sizeBytes: number; numTriangles: number }", +[](const Shape &s) -> val {
                 Shape::Stats st = s.GetStats();
                 val o = val::object();
@@ -1818,7 +1818,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
             +[](const TransformedShape &ts, uint32 subShapeID) {
                 return const_cast<PhysicsMaterial *>(ts.GetMaterial(toSubShapeID(subShapeID))); }, allow_raw_pointers())
         .function("GetSubShapeUserData(subShapeID)",
-            +[](const TransformedShape &ts, uint32 subShapeID) { return (uint32)ts.GetSubShapeUserData(toSubShapeID(subShapeID)); })
+            +[](const TransformedShape &ts, uint32 subShapeID) { return (uint64)ts.GetSubShapeUserData(toSubShapeID(subShapeID)); })
         .function("GetBodyID", +[](const TransformedShape &ts) { return fromBodyID(ts.mBodyID); })
         .function("GetShape", +[](const TransformedShape &ts) { return const_cast<Shape *>(ts.mShape.GetPtr()); }, allow_raw_pointers())
         .function("SetShape(shape)", +[](TransformedShape &ts, const Shape *s) { ts.mShape = s; }, allow_raw_pointers())
@@ -3580,7 +3580,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
         .property("mIsSensorB",   &CharacterVirtual::Contact::mIsSensorB)
         // mCharacterB may dangle when read via GetActiveContacts() — prefer GetCharacterIDB.
         .function("GetCharacterB", +[](const CharacterVirtual::Contact &c) { return const_cast<CharacterVirtual *>(c.mCharacterB); }, allow_raw_pointers())
-        .function("GetUserData", +[](const CharacterVirtual::Contact &c) { return (uint32)c.mUserData; })
+        .function("GetUserData", +[](const CharacterVirtual::Contact &c) { return (uint64)c.mUserData; })
         .function("GetMaterial", +[](const CharacterVirtual::Contact &c) { return const_cast<PhysicsMaterial *>(c.mMaterial); }, allow_raw_pointers())
         .property("mHadCollision",     &CharacterVirtual::Contact::mHadCollision)
         .property("mWasDiscarded",     &CharacterVirtual::Contact::mWasDiscarded)
@@ -3646,7 +3646,7 @@ EMSCRIPTEN_BINDINGS(jolt) {
         .function("GetGroundBodyID", +[](const CharacterBase &c) { return (uint32)c.GetGroundBodyID().GetIndexAndSequenceNumber(); })
         .function("GetGroundMaterial", +[](const CharacterBase &c) { return const_cast<PhysicsMaterial *>(c.GetGroundMaterial()); }, allow_raw_pointers())
         .function("GetGroundSubShapeID", +[](const CharacterBase &c) { return (uint32)c.GetGroundSubShapeID().GetValue(); })
-        .function("GetGroundUserData", +[](const CharacterBase &c) { return (uint32)c.GetGroundUserData(); })
+        .function("GetGroundUserData", +[](const CharacterBase &c) { return (uint64)c.GetGroundUserData(); })
         .function("SaveState(stream)", +[](const CharacterBase &c, StateRecorder &s) { c.SaveState(s); }, allow_raw_pointers())
         .function("RestoreState(stream)", +[](CharacterBase &c, StateRecorder &s) { c.RestoreState(s); }, allow_raw_pointers());
 
@@ -3709,8 +3709,8 @@ EMSCRIPTEN_BINDINGS(jolt) {
         .function("GetListener", &CharacterVirtual::GetListener, allow_raw_pointers())
         .function("SetCharacterVsCharacterCollision(collision)", &CharacterVirtual::SetCharacterVsCharacterCollision, allow_raw_pointers())
         // user data
-        .function("GetUserData", +[](const CharacterVirtual &c) { return (uint32)c.GetUserData(); })
-        .function("SetUserData(userData)", +[](CharacterVirtual &c, uint32 v) { c.SetUserData(v); })
+        .function("GetUserData", +[](const CharacterVirtual &c) { return (uint64)c.GetUserData(); })
+        .function("SetUserData(userData)", +[](CharacterVirtual &c, uint64 v) { c.SetUserData(v); })
         // shape offset / hit tuning
         .out_function("GetShapeOffset(out)", out_desc::Vec3, +[](const CharacterVirtual &c, uintptr_t out) { WriteVec3(c.GetShapeOffset(), out); })
         .function("SetShapeOffset(shapeOffset)", &CharacterVirtual::SetShapeOffset)
