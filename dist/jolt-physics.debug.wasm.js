@@ -3999,7 +3999,7 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('wasmBinary');
 }
 var ASM_CONSTS = {
-  1282840: () => { return HEAP8.length }
+  1282904: () => { return HEAP8.length }
 };
 
 // Imports from the Wasm binary.
@@ -4346,6 +4346,7 @@ await run();
     physicsSystem['SetContactListener'](impl);
     return {
       '_impl': impl,
+      '_sys': physicsSystem,   // kept so destroy can unregister the listener before freeing impl
       'addedCount': 0, 'persistedCount': 0, 'removedCount': 0,
       _addedI32: null, _addedI32Base: 0,
       _addedF32: null, _addedF32Base: 0,
@@ -4420,7 +4421,13 @@ await run();
     return out;
   }
 
-  function destroyContactBuffer(buf) { buf['_impl']['delete'](); }
+  function destroyContactBuffer(buf) {
+    // Unregister before freeing — otherwise PhysicsSystem keeps a pointer to the deleted listener
+    // and the next Step() dereferences freed memory (use-after-free). SetContactListener is bound
+    // allow_raw_pointers(); null marshals to nullptr, which Jolt accepts to clear the listener.
+    buf['_sys']['SetContactListener'](null);
+    buf['_impl']['delete']();
+  }
 
   // ---- active body buffer ----
 

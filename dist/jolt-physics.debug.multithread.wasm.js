@@ -5154,7 +5154,7 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('wasmBinary');
 }
 var ASM_CONSTS = {
-  1285896: () => { return HEAP8.length }
+  1285960: () => { return HEAP8.length }
 };
 
 // Imports from the Wasm binary.
@@ -5471,8 +5471,8 @@ if (ENVIRONMENT_IS_PTHREAD) {
 	invokeEntryPoint = (ptr, arg) => {
 		if (arg.script) {
 			// Workaround for bug: https://github.com/jrouwe/JoltPhysics.js/issues/245
-			// `replace_by_import` gets replaced by `import`
-			replace_by_import(arg.script).then(module => {
+			// `import` gets replaced by `import`
+			import(arg.script).then(module => {
 				module.default(Module, arg.params).then(() => _invokeEntryPoint(ptr, arg.value));
 			})
 		} else {
@@ -5607,6 +5607,7 @@ if (ENVIRONMENT_IS_PTHREAD) {
     physicsSystem['SetContactListener'](impl);
     return {
       '_impl': impl,
+      '_sys': physicsSystem,   // kept so destroy can unregister the listener before freeing impl
       'addedCount': 0, 'persistedCount': 0, 'removedCount': 0,
       _addedI32: null, _addedI32Base: 0,
       _addedF32: null, _addedF32Base: 0,
@@ -5681,7 +5682,13 @@ if (ENVIRONMENT_IS_PTHREAD) {
     return out;
   }
 
-  function destroyContactBuffer(buf) { buf['_impl']['delete'](); }
+  function destroyContactBuffer(buf) {
+    // Unregister before freeing — otherwise PhysicsSystem keeps a pointer to the deleted listener
+    // and the next Step() dereferences freed memory (use-after-free). SetContactListener is bound
+    // allow_raw_pointers(); null marshals to nullptr, which Jolt accepts to clear the listener.
+    buf['_sys']['SetContactListener'](null);
+    buf['_impl']['delete']();
+  }
 
   // ---- active body buffer ----
 

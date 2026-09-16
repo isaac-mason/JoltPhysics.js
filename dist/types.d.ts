@@ -154,14 +154,14 @@ export interface Shape extends ClassHandle {
   GetMassProperties(): MassProperties;
   MustBeStatic(): boolean;
   GetRefCount(): number;
-  GetUserData(): number;
-  SetUserData(userData: number): void;
   GetSubShapeIDBitsRecursive(): number;
   GetLeafShape(subShapeID: number): Shape | null;
   GetMaterial(subShapeID: number): PhysicsMaterial | null;
-  GetSubShapeUserData(subShapeID: number): number;
   GetCenterOfMass(out: Vec3): Vec3;
   GetLocalBounds(out: AABox): AABox;
+  GetUserData(): bigint;
+  SetUserData(userData: bigint): void;
+  GetSubShapeUserData(subShapeID: number): bigint;
   IsValidScale(scale: Vec3): boolean;
   MakeScaleValid(scale: Vec3): Vec3;
   ScaleShape(scale: Vec3): ShapeResult;
@@ -397,7 +397,6 @@ export interface TransformedShape extends ClassHandle {
   CastRayCollide(ray: RRayCast, settings: RayCastSettings, collector: CastRayCollector, shapeFilter: ShapeFilter): void;
   SetShape(shape: Shape | null): void;
   GetMaterial(subShapeID: number): PhysicsMaterial | null;
-  GetSubShapeUserData(subShapeID: number): number;
   GetBodyID(): number;
   GetShapeScale(out: Vec3): Vec3;
   GetCenterOfMassTransform(out: Mat44): Mat44;
@@ -406,6 +405,7 @@ export interface TransformedShape extends ClassHandle {
   GetWorldSpaceBounds(out: AABox): AABox;
   GetShapePositionCOM(out: Vec3): Vec3;
   GetShapeRotation(out: Quat): Quat;
+  GetSubShapeUserData(subShapeID: number): bigint;
   CollidePoint(point: Vec3, collector: CollidePointCollector, shapeFilter: ShapeFilter): void;
   CastShape(shapeCast: RShapeCast, settings: ShapeCastSettings, baseOffset: Vec3, collector: CastShapeCollector, shapeFilter: ShapeFilter): void;
   SetShapeScale(scale: Vec3): void;
@@ -1949,11 +1949,11 @@ export interface CharacterVirtualContact extends ClassHandle {
   GetBodyB(): number;
   GetCharacterIDB(): number;
   GetSubShapeIDB(): number;
-  GetUserData(): number;
   GetPosition(out: Vec3): Vec3;
   GetLinearVelocity(out: Vec3): Vec3;
   GetContactNormal(out: Vec3): Vec3;
   GetSurfaceNormal(out: Vec3): Vec3;
+  GetUserData(): bigint;
 }
 
 export interface ArrayCharacterVirtualContact extends ClassHandle {
@@ -2009,11 +2009,11 @@ export interface CharacterBase extends ClassHandle {
   IsSupported(): boolean;
   GetGroundBodyID(): number;
   GetGroundSubShapeID(): number;
-  GetGroundUserData(): number;
   GetUp(out: Vec3): Vec3;
   GetGroundPosition(out: Vec3): Vec3;
   GetGroundNormal(out: Vec3): Vec3;
   GetGroundVelocity(out: Vec3): Vec3;
+  GetGroundUserData(): bigint;
   SetUp(up: Vec3): void;
   IsSlopeTooSteep(normal: Vec3): boolean;
   GetCosMaxSlopeAngle(): number;
@@ -2038,8 +2038,6 @@ export interface CharacterVirtual extends CharacterBase {
   HasCollidedWithCharacter(character: CharacterVirtual | null): boolean;
   RefreshContacts(objectLayer: number, jolt: JoltInterface): void;
   GetInnerBodyID(): number;
-  GetUserData(): number;
-  SetUserData(userData: number): void;
   GetMaxNumHits(): number;
   SetMaxNumHits(maxHits: number): void;
   HasCollidedWithBody(bodyID: number): boolean;
@@ -2050,6 +2048,8 @@ export interface CharacterVirtual extends CharacterBase {
   GetWorldTransform(out: Mat44): Mat44;
   GetCenterOfMassTransform(out: Mat44): Mat44;
   GetShapeOffset(out: Vec3): Vec3;
+  GetUserData(): bigint;
+  SetUserData(userData: bigint): void;
   SetPosition(position: Vec3): void;
   SetLinearVelocity(velocity: Vec3): void;
   CanWalkStairs(linearVelocity: Vec3): boolean;
@@ -2514,80 +2514,6 @@ export interface VehicleConstraint extends Constraint {
   GetWheelWorldTransform(out: Mat44, wheelIndex: number, wheelRight: Vec3, wheelUp: Vec3): Mat44;
   SetMaxPitchRollAngle(maxPitchRollAngle: number): void;
   GetMaxPitchRollAngle(): number;
-}
-
-export interface ECullModeValue<T extends number> {
-  value: T;
-}
-export type ECullMode = ECullModeValue<0>|ECullModeValue<1>|ECullModeValue<2>;
-
-export interface ECastShadowValue<T extends number> {
-  value: T;
-}
-export type ECastShadow = ECastShadowValue<0>|ECastShadowValue<1>;
-
-export interface EDrawModeValue<T extends number> {
-  value: T;
-}
-export type EDrawMode = EDrawModeValue<0>|EDrawModeValue<1>;
-
-export interface EShapeColorValue<T extends number> {
-  value: T;
-}
-export type EShapeColor = EShapeColorValue<0>|EShapeColorValue<1>|EShapeColorValue<2>|EShapeColorValue<3>|EShapeColorValue<4>|EShapeColorValue<5>;
-
-export interface ESoftBodyConstraintColorValue<T extends number> {
-  value: T;
-}
-export type ESoftBodyConstraintColor = ESoftBodyConstraintColorValue<0>|ESoftBodyConstraintColorValue<1>|ESoftBodyConstraintColorValue<2>;
-
-export interface BodyManagerDrawSettings extends ClassHandle {
-  mDrawShapeColor: EShapeColor;
-  mDrawSoftBodyConstraintColor: ESoftBodyConstraintColor;
-  mDrawGetSupportFunction: boolean;
-  mDrawSupportDirection: boolean;
-  mDrawGetSupportingFace: boolean;
-  mDrawShape: boolean;
-  mDrawShapeWireframe: boolean;
-  mDrawBoundingBox: boolean;
-  mDrawCenterOfMassTransform: boolean;
-  mDrawWorldTransform: boolean;
-  mDrawVelocity: boolean;
-  mDrawMassAndInertia: boolean;
-  mDrawSleepStats: boolean;
-  mDrawSoftBodyVertices: boolean;
-  mDrawSoftBodyVertexVelocities: boolean;
-  mDrawSoftBodyEdgeConstraints: boolean;
-  mDrawSoftBodyBendConstraints: boolean;
-  mDrawSoftBodyVolumeConstraints: boolean;
-  mDrawSoftBodySkinConstraints: boolean;
-  mDrawSoftBodyLRAConstraints: boolean;
-  mDrawSoftBodyRods: boolean;
-  mDrawSoftBodyRodStates: boolean;
-  mDrawSoftBodyRodBendTwistConstraints: boolean;
-  mDrawSoftBodyPredictedBounds: boolean;
-}
-
-export interface DebugRendererVertexTraits extends ClassHandle {
-}
-
-export interface DebugRendererTriangleTraits extends ClassHandle {
-}
-
-export interface DebugRendererEm extends ClassHandle {
-  Initialize(): void;
-  DrawBodies(system: PhysicsSystem | null, settings: BodyManagerDrawSettings | null): void;
-  DrawBodies(system: PhysicsSystem | null): void;
-  DrawConstraints(system: PhysicsSystem | null): void;
-  DrawConstraintLimits(system: PhysicsSystem | null): void;
-  DrawConstraintReferenceFrame(system: PhysicsSystem | null): void;
-  DrawConstraint(constraint: Constraint | null): void;
-  DrawBody(body: Body | null, color: Color, wireframe: boolean): void;
-  DrawShape(shape: Shape | null, modelMatrix: Mat44, scale: Vec3, color: Color, wireframe: boolean): void;
-}
-
-export interface DebugRendererWrapper extends DebugRendererEm {
-  notifyOnDestruction(): void;
 }
 
 export type Color = [ r: number, g: number, b: number, a: number ];
@@ -3283,29 +3209,6 @@ interface EmbindModule {
   VehicleConstraint: {
     new(body: Body, settings: VehicleConstraintSettings): VehicleConstraint;
   };
-  ECullMode: {CullBackFace: ECullModeValue<0>, CullFrontFace: ECullModeValue<1>, Off: ECullModeValue<2>};
-  ECastShadow: {On: ECastShadowValue<0>, Off: ECastShadowValue<1>};
-  EDrawMode: {Solid: EDrawModeValue<0>, Wireframe: EDrawModeValue<1>};
-  EShapeColor: {InstanceColor: EShapeColorValue<0>, ShapeTypeColor: EShapeColorValue<1>, MotionTypeColor: EShapeColorValue<2>, SleepColor: EShapeColorValue<3>, IslandColor: EShapeColorValue<4>, MaterialColor: EShapeColorValue<5>};
-  ESoftBodyConstraintColor: {ConstraintType: ESoftBodyConstraintColorValue<0>, ConstraintGroup: ESoftBodyConstraintColorValue<1>, ConstraintOrder: ESoftBodyConstraintColorValue<2>};
-  BodyManagerDrawSettings: {
-    new(): BodyManagerDrawSettings;
-  };
-  DebugRendererVertexTraits: {
-    mPositionOffset(): number;
-    mNormalOffset(): number;
-    mUVOffset(): number;
-    mSize(): number;
-  };
-  DebugRendererTriangleTraits: {
-    mVOffset(): number;
-    mSize(): number;
-  };
-  DebugRendererEm: {
-    implement(obj: any): DebugRendererWrapper;
-    extend(name: EmbindString, obj: any): any;
-  };
-  DebugRendererWrapper: {};
   addVehicleStepListener(_0: PhysicsSystem | null, _1: VehicleConstraint | null): void;
   getContactBodyID(_0: number): number;
   getContactBodyCOM(_0: number): Vec3;
@@ -3340,20 +3243,17 @@ export interface CharacterContactListenerCallbacks {
 
 export type Contact = {
   body1: number; body2: number; subShape1: number; subShape2: number;
-  normal: Vec3; penetration: number; isNew: boolean; pointCount: number;
+  normal: Vec3; penetration: number; pointCount: number;
 };
 export type ContactPoint = { on1: Vec3; on2: Vec3 };
 export type RemovedContact = { body1: number; subShape1: number; body2: number; subShape2: number };
-/** Buffered contact events — zero-allocation bulk reads (see ContactListenerBuffer). */
+/** Buffered contact events — zero-allocation bulk reads (see ContactListenerBuffer). Operated via the
+ * module-level contact-buffer functions on JoltFacade below (clearContactBuffer / updateContactBuffer /
+ * getContactBuffer*At / destroyContactBuffer), not instance methods. */
 export interface ContactBuffer {
-  readonly contactCount: number;
+  readonly addedCount: number;
+  readonly persistedCount: number;
   readonly removedCount: number;
-  clear(): void;    // before Step
-  refresh(): void;  // after Step
-  getContact(out: Contact, index: number): Contact;
-  getPoint(out: ContactPoint, contact: Contact, pointIndex: number): ContactPoint;
-  getRemoved(out: RemovedContact, index: number): RemovedContact;
-  destroy(): void;
 }
 export type ActiveBodyState = {
   id: number;
@@ -3368,6 +3268,13 @@ export interface ActiveBodyBufferHandle {
 }
 export interface JoltFacade {
   createContactBuffer(physicsSystem: PhysicsSystem): ContactBuffer;
+  clearContactBuffer(buffer: ContactBuffer): void;    // before Step
+  updateContactBuffer(buffer: ContactBuffer): void;   // after Step
+  getContactBufferAddedAt(buffer: ContactBuffer, out: Contact, index: number): Contact;
+  getContactBufferPersistedAt(buffer: ContactBuffer, out: Contact, index: number): Contact;
+  getContactBufferRemovedAt(buffer: ContactBuffer, out: RemovedContact, index: number): RemovedContact;
+  getContactBufferPointAt(buffer: ContactBuffer, out: ContactPoint, contact: Contact, pointIndex: number): ContactPoint;
+  destroyContactBuffer(buffer: ContactBuffer): void;
   createContact(): Contact;
   createContactPoint(): ContactPoint;
   createRemovedContact(): RemovedContact;
