@@ -5,10 +5,11 @@
 .DESCRIPTION
     Default -BuildType Distribution matches ./build.sh with no args: a fast Debug non-compat preamble (ST only)
     is built first with -DCMAKE_BUILD_TYPE=Debug so it emits dist\jolt-physics.debug.wasm.js +
-    dist\jolt-physics.debug.wasm.wasm without colliding with the Release outputs; then a full Distribution ST+MT
+    dist\jolt-physics.debug.wasm.wasm without colliding with the Release outputs; then a full Distribution ST
     build is run for the standard npm dist outputs; then d.ts shims and Examples/js copy.
+    The multi-threaded flavours are not built or shipped (see build.sh / README).
 
-    Prefer the non-compat debug builds (debug-wasm / debug-wasm-multithread) for C++ debugging: the
+    Prefer the non-compat debug build (debug-wasm) for C++ debugging: the
     wasm-compat debug variants embed a multi-MB base64 WASM blob in JS, which crashes Chrome DevTools
     when setting C++ breakpoints (the DWARF extension can't keep all three of: WASM bytes, JS source, and DWARF
     index resident at once). The non-compat debug build keeps JS glue ~1 MB and exposes WASM as a first-class
@@ -241,7 +242,10 @@ try {
         # closure link time.
         Invoke-EmcmakeBuild -BuildDir "Build/Debug/ST" -CMakeBuildType "Debug" -ExtraCmakeArgs @(
             "-DBUILD_WASM_COMPAT_ONLY=OFF",
-            "-DENABLE_SIMD=ON"
+            "-DENABLE_SIMD=ON",
+            # Full DWARF: this preamble emits the ./debug-wasm sidecar Nilo sets C++ breakpoints in.
+            # Matches build.sh's Build/Debug/SidecarST pass.
+            "-DJPH_FULL_DWARF=ON"
         ) -Target "jolt-wasm"
         if (-not (Test-Path "dist\jolt-physics.debug.wasm.js")) {
             throw "Preamble did not produce dist\jolt-physics.debug.wasm.js"
@@ -255,12 +259,8 @@ try {
     # When -BuildType Debug, this is a developer-convenience mode: every artifact is Debug content
     # under the Release name, no .debug.* artifacts produced, and dist/ is NOT publish-ready. Use
     # -BuildType Distribution (default) for a publish-quality dist with both Release + Debug artifacts.
-    Write-Host "=== Primary: $BuildType ST + MT (full npm dist) ==="
+    Write-Host "=== Primary: $BuildType ST (full npm dist) ==="
     Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/ST" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
-        "-DENABLE_SIMD=ON"
-    )
-    Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/MT" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
-        "-DENABLE_MULTI_THREADING=ON",
         "-DENABLE_SIMD=ON"
     )
 
@@ -270,8 +270,7 @@ try {
             "jolt-physics.wasm.d.ts",
             "jolt-physics.wasm-compat.d.ts",
             "jolt-physics.debug.wasm.d.ts",
-            "jolt-physics.multithread.wasm.d.ts",
-            "jolt-physics.multithread.wasm-compat.d.ts")) {
+            "jolt-physics.debug.wasm-compat.d.ts")) {
         Set-Content -Path "dist\$name" -Value $dts -Encoding utf8
     }
 
@@ -286,15 +285,27 @@ try {
     # have these left behind. If they're left in dist/ they don't ship (not in package.json
     # files), but they confuse `npm pack --dry-run` output.
     #
-    # NOTE: the *.wasm-compat debug artifacts are NOT listed here — both debug-wasm-compat and
-    # debug-wasm-compat-multithread are exported entry points, so deleting them would leave a
-    # Windows-built package with dangling exports.
+    # NOTE: the ST *.wasm-compat debug artifact is NOT listed here — debug-wasm-compat
+    # is an exported entry point, so deleting it would leave a
+    # Windows-built package with a dangling export. The multithread artifacts ARE listed: the
+    # fork no longer ships them (see build.sh), so leftovers from an older build should be swept.
     foreach ($stale in @(
             "dist\jolt-physics.debug.js",
             "dist\jolt-physics.debug.d.ts",
             "dist\jolt-physics.js",
             "dist\jolt-physics.d.ts",
-            "dist\jolt-physics.multithread.d.ts")) {
+            "dist\jolt-physics.multithread.d.ts",
+            "dist\jolt-physics.multithread.wasm.js",
+            "dist\jolt-physics.multithread.wasm.d.ts",
+            "dist\jolt-physics.multithread.wasm.wasm",
+            "dist\jolt-physics.multithread.wasm-compat.js",
+            "dist\jolt-physics.multithread.wasm-compat.d.ts",
+            "dist\jolt-physics.debug.multithread.wasm.js",
+            "dist\jolt-physics.debug.multithread.wasm.d.ts",
+            "dist\jolt-physics.debug.multithread.wasm.wasm",
+            "dist\jolt-physics.debug.multithread.wasm.wasm.map",
+            "dist\jolt-physics.debug.multithread.wasm-compat.js",
+            "dist\jolt-physics.debug.multithread.wasm-compat.d.ts")) {
         if (Test-Path -LiteralPath $stale) {
             Write-Host "Cleanup: removing stale $stale (no longer shipped)"
             Remove-Item -Force -LiteralPath $stale
@@ -309,11 +320,6 @@ try {
         "dist\jolt-physics.wasm.js",
         "dist\jolt-physics.wasm.d.ts",
         "dist\jolt-physics.wasm.wasm",
-        "dist\jolt-physics.multithread.wasm-compat.js",
-        "dist\jolt-physics.multithread.wasm-compat.d.ts",
-        "dist\jolt-physics.multithread.wasm.js",
-        "dist\jolt-physics.multithread.wasm.d.ts",
-        "dist\jolt-physics.multithread.wasm.wasm",
         "dist\types.d.ts"
     )
     if ($BuildType -ne "Debug") {
