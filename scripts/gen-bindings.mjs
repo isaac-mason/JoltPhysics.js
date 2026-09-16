@@ -97,7 +97,7 @@ function applyOutParamTypes(src) {
     return line;
   }).join('\n');
   for (const { cls, method } of outMeta)
-    if (!seen.has(`${cls}.${method}`)) warn(`out-param retype for ${cls}.${method} matched no "${method}Into(...): void;" line`);
+    if (!seen.has(`${cls}.${method}`)) warn(`out-param retype for ${cls}.${method} matched no "${method}Into(...)" declaration`);
   return src;
 }
 

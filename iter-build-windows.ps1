@@ -182,6 +182,10 @@ $buildDir = "Build/Iter/$Variant/ST"
 # refer to the same storage. Assigning a String to a [switch]-typed variable raises
 # "Cannot convert value 'System.String' to type 'SwitchParameter'". Use a distinct name.
 $fastLinkArg = if ($FastLink) { "ON" } else { "OFF" }
+# Full DWARF only for the Debug (non-compat sidecar) variant — the build this script exists to
+# produce for C++ breakpoints in Chrome. Release/Distribution here is a publish-format parity
+# check and needs no debug info. Hoisted so the reconfigure cache key and the -D flag can't drift.
+$fullDwarfArg = if ($Variant -eq "Debug") { "ON" } else { "OFF" }
 $joltArg = "-DJOLT_PHYSICS_PATH=$($coreResolved -replace '\\', '/')"
 
 # Variant -> target + expected output(s). The two variants use DIFFERENT filenames, so they
@@ -216,7 +220,11 @@ try {
     }
 
     $cmakeFlagsFile = Join-Path $buildDir ".nilo-iter-flags"
-    $expectedFlags = "variant=$Variant;target=$buildTarget;compatOnly=$compatOnly;fastlink=$fastLinkArg;jolt=$coreResolved"
+    # NOTE: every -D flag that affects the build MUST appear here. The file is the only thing that
+    # forces a reconfigure of an existing Build/Iter dir; a flag missing from this key is silently
+    # never applied to dirs configured before it was added. That is how JPH_FULL_DWARF would have
+    # gone unapplied — leaving debug iter builds with no DWARF and no working C++ breakpoints.
+    $expectedFlags = "variant=$Variant;target=$buildTarget;compatOnly=$compatOnly;fastlink=$fastLinkArg;simd=ON;dwarf=$fullDwarfArg;jolt=$coreResolved"
 
     $needsConfigure = $Reconfigure -or -not (Test-Path -LiteralPath (Join-Path $buildDir "CMakeCache.txt"))
     if (-not $needsConfigure -and (Test-Path -LiteralPath $cmakeFlagsFile)) {
@@ -241,10 +249,7 @@ try {
             "-DBUILD_WASM_COMPAT_ONLY=$compatOnly",
             "-DENABLE_MULTI_THREADING=OFF",
             "-DENABLE_SIMD=ON",
-            # Full DWARF only for the Debug (non-compat sidecar) variant — that is the build this
-            # script exists to produce for C++ breakpoints in Chrome. Release/Distribution here is
-            # a publish-format parity check and does not need debug info.
-            "-DJPH_FULL_DWARF=$(if ($Variant -eq 'Debug') { 'ON' } else { 'OFF' })",
+            "-DJPH_FULL_DWARF=$fullDwarfArg",
             "-DJPH_DEV_FAST_LINK=$fastLinkArg",
             $joltArg
         )

@@ -4374,18 +4374,22 @@ await run();
         `return function(${paramList}){const h=Module.HEAPF32;const _r=rawIntoMethod.call(this,${intoArgList});${copyLoops}return _r;}`
       )(rawIntoMethod, Module);
     }
-    // One out: return it directly (zero-alloc). Multiple: fill + return a per-reader reused tuple
-    // (allocated once here) so the convenience return costs no per-call allocation. It's a PACKED
-    // array literal (not new Array(N), which is HOLEY and never transitions back to the fast path).
+    // One out: return it directly (zero-alloc). Multiple: return a FRESH tuple each call.
+    //
+    // This deliberately allocates. A hoisted, reused tuple would be zero-alloc, but every call
+    // would hand back the same array object, so holding a result across a second call would
+    // silently see the second call's values. Only 2 readers take this path
+    // (BodyInterface.GetPositionAndRotation / GetLinearAndAngularVelocity) and the tuple is pure
+    // convenience — the caller's own out arrays are the real results and are unaffected either
+    // way — so correctness wins over saving one small array per call. It's a PACKED array literal
+    // (not new Array(N), which is HOLEY and never transitions back to the fast path).
     if (outParams.length === 1) {
       return new Function('rawIntoMethod', 'Module',
         `return function(${paramList}){const h=Module.HEAPF32;rawIntoMethod.call(this,${intoArgList});${copyLoops}return ${outParams[0]};}`
       )(rawIntoMethod, Module);
     }
-    const emptyRet = `[${outParams.map(() => 'null').join(',')}]`;
-    const fillRet  = outParams.map((o, i) => `_ret[${i}]=${o};`).join('');
     return new Function('rawIntoMethod', 'Module',
-      `const _ret=${emptyRet};return function(${paramList}){const h=Module.HEAPF32;rawIntoMethod.call(this,${intoArgList});${copyLoops}${fillRet}return _ret;}`
+      `return function(${paramList}){const h=Module.HEAPF32;rawIntoMethod.call(this,${intoArgList});${copyLoops}return [${outParams.join(',')}];}`
     )(rawIntoMethod, Module);
   }
 
@@ -4507,8 +4511,19 @@ await run();
     // Unregister before freeing — otherwise PhysicsSystem keeps a pointer to the deleted listener
     // and the next Step() dereferences freed memory (use-after-free). SetContactListener is bound
     // allow_raw_pointers(); null marshals to nullptr, which Jolt accepts to clear the listener.
-    buf['_sys']['SetContactListener'](null);
-    buf['_impl']['delete']();
+    //
+    // Only clear it if the system still points at OUR listener: a caller may have installed their
+    // own listener after creating this buffer, and blindly nulling would silently uninstall theirs.
+    // GetContactListener is allow_raw_pointers(), so embind returns a FRESH wrapper each call --
+    // `===` would never match. isAliasOf() is embind's public "same underlying C++ object" test.
+    const sys = buf['_sys'], impl = buf['_impl'];
+    const current = sys['GetContactListener']();
+    if (current && impl['isAliasOf'](current)) sys['SetContactListener'](null);
+    // NOTE: `current` is deliberately NOT deleted. embind's raw-pointer return still registers a
+    // destructor, so current.delete() destroys the C++ listener itself -- the following
+    // impl.delete() then double-frees and traps with "table index is out of bounds". Leaking one
+    // small JS handle per destroy (called once per buffer lifetime) is the cheaper mistake.
+    impl['delete']();
   }
 
   // ---- active body buffer ----

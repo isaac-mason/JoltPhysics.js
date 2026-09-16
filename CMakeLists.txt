@@ -271,21 +271,19 @@ add_custom_target(jolt-typing ALL DEPENDS ${JOLT_TYPING} ${JOLT_POST_GENERATED})
 # a raw dynamic import() survives the emscripten/closure JS pipeline (JoltPhysics.js issue #245).
 # Swap it back to a real `import` in the final bundles.
 #
-# This is gated on closure actually running, NOT on ENABLE_MULTI_THREADING. multi-threaded.js is one
-# source of a dynamic import, but since emscripten 6.x the Node bootstrap emits `await
-# import("node:module")` in EVERY build — so single-threaded closure builds need the fixup too, or
-# they die at load with `ReferenceError: replace_by_import is not defined`. Debug builds link with
-# --closure=0, so nothing aliases and the replace is skipped.
-#
-# Both the single-file compat build and the separate-.wasm sidecar need it; the replace is a no-op
-# when no placeholder is present, so applying it unconditionally under closure is safe.
-if (USE_CLOSURE AND NOT JPH_DEV_FAST_LINK)
-	set(FIXUP_IMPORT_COMMAND         COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm-compat.js)
-	set(FIXUP_IMPORT_SIDECAR_COMMAND COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm.js)
-else()
-	set(FIXUP_IMPORT_COMMAND "")
-	set(FIXUP_IMPORT_SIDECAR_COMMAND "")
-endif()
+# Applied UNCONDITIONALLY, because the placeholder has two independent sources and gating on either
+# one alone is wrong:
+#   1. multi-threaded.js contains a literal `replace_by_import(arg.script)` call. It is added via
+#      --post-js whenever ENABLE_MULTI_THREADING is on, regardless of closure. Gating on closure
+#      would leave an MT build made with --closure=0 (or JPH_DEV_FAST_LINK) throwing
+#      `ReferenceError: replace_by_import is not defined` when a worker starts.
+#   2. Since emscripten 6.x the Node bootstrap emits `await import("node:module")` in EVERY build,
+#      and closure rewrites it to the placeholder. Gating on ENABLE_MULTI_THREADING would leave
+#      single-threaded closure builds dead at load for the same reason.
+# The replace is a no-op when no placeholder is present, so running it always is both correct and
+# cheap. Uses JOLT_REPLACE_IMPORT (Python) rather than `perl`, which is absent on stock Windows.
+set(FIXUP_IMPORT_COMMAND         COMMAND ${JOLT_REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm-compat.js)
+set(FIXUP_IMPORT_SIDECAR_COMMAND COMMAND ${JOLT_REPLACE_IMPORT} ${OUTPUT_BASE_NAME}.wasm.js)
 
 # ---- flavor outputs ----
 if (NOT BUILD_WASM_COMPAT_ONLY)

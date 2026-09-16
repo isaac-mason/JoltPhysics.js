@@ -18,6 +18,15 @@ cmake_minimum_required(VERSION 3.13)
 #   - the post-emcc replace_by_import workaround (emscripten#245)
 set(JOLT_BUILD_TOOLS "${CMAKE_CURRENT_SOURCE_DIR}/build-tools/jolt_codegen_helpers.py"
     CACHE INTERNAL "Nilo: path to Python codegen helpers")
+# Python3_EXECUTABLE is only defined once find_package has run, and this file is included before
+# anything else would trigger it — without this, JOLT_REPLACE_IMPORT expanded to an EMPTY program
+# name and the helper was unusable (which is why CMakeLists.txt called `perl` directly instead).
+# The interpreter is a HOST build tool, but the Emscripten toolchain re-roots program lookup at the
+# sysroot — so force host search for the duration of this find_package, then restore.
+set(_nilo_saved_find_root_program "${CMAKE_FIND_ROOT_PATH_MODE_PROGRAM}")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM "${_nilo_saved_find_root_program}")
 set(JOLT_REPLACE_IMPORT
     "${Python3_EXECUTABLE}" "${JOLT_BUILD_TOOLS}" replace-import-token
     CACHE INTERNAL "Nilo: post-emcc replace_by_import workaround command")
