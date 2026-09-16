@@ -241,6 +241,10 @@ try {
             "-DBUILD_WASM_COMPAT_ONLY=$compatOnly",
             "-DENABLE_MULTI_THREADING=OFF",
             "-DENABLE_SIMD=ON",
+            # Full DWARF only for the Debug (non-compat sidecar) variant — that is the build this
+            # script exists to produce for C++ breakpoints in Chrome. Release/Distribution here is
+            # a publish-format parity check and does not need debug info.
+            "-DJPH_FULL_DWARF=$(if ($Variant -eq 'Debug') { 'ON' } else { 'OFF' })",
             "-DJPH_DEV_FAST_LINK=$fastLinkArg",
             $joltArg
         )

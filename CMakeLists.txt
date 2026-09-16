@@ -63,12 +63,26 @@ set(ENABLE_OBJECT_STREAM OFF)               # Turn off ObjectStream
 set(OBJECT_LAYER_BITS 32)                   # 32-bit object layers for ObjectLayerPairFilterMask
 set(CPP_RTTI_ENABLED ON)                    # embind auto-downcasting relies on C++ RTTI
 
+# NILO: full DWARF roughly quadruples the debug module (11 MB -> 48 MB), so it is opt-in per flavor
+# rather than global. Only the single-threaded non-compat sidecar Debug build
+# needs it — that is `./debug-wasm` (dist/jolt-physics.debug.wasm.{js,wasm}), the one Nilo's runtime
+# toggle imports, and the same target iter-build emits for local-iter debugging. Every other Debug
+# flavor (MT, and both wasm-compat forms) stays on upstream's cheap source maps.
+option(JPH_FULL_DWARF "Emit full DWARF (-g3) instead of source maps; required for C++ breakpoints (Debug only)" OFF)
+
 # Override debug symbols
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	set(GENERATE_DEBUG_SYMBOLS ON)
-	# NILO: full DWARF (level 3) instead of upstream's "source-map" — needed by Chrome's
-	# C/C++ DevTools Support extension; sidecar .wasm.map is unreachable in wasm-compat.
-	set(JPH_DEBUG_SYMBOL_FORMAT "3" CACHE STRING "")
+	# FORCE is required on the derived Jolt variable: a plain `set(... CACHE ...)` silently loses to
+	# an existing cache entry, so a build dir configured before this fork changed the value kept the
+	# old format forever. That is exactly how the fork's earlier switch to "3" never took effect —
+	# every build kept emitting source maps and NO DWARF. Verified: seeding a cache and
+	# reconfiguring leaves the value unchanged without FORCE.
+	if (JPH_FULL_DWARF)
+		set(JPH_DEBUG_SYMBOL_FORMAT "3" CACHE STRING "" FORCE)
+	else()
+		set(JPH_DEBUG_SYMBOL_FORMAT "source-map" CACHE STRING "" FORCE)
+	endif()
 else()
 	set(GENERATE_DEBUG_SYMBOLS OFF)
 endif()
@@ -183,6 +197,12 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 	# NILO: ${JPH_DEBUG_PREFIX_MAP_FLAGS} (from nilo_compute_debug_prefix_map_flags) makes DWARF
 	# source paths portable so Chrome's DWARF extension can locate sources via Path Substitutions.
 	set(EMCC_ARGS ${EMCC_ARGS} ${JPH_DEBUG_PREFIX_MAP_FLAGS} -g${JPH_DEBUG_SYMBOL_FORMAT} -s ASSERTIONS --closure=0)
+	# DWARF is embedded in the module rather than split out with -gseparate-dwarf. A sidecar keeps
+	# the runtime .wasm smaller (18 MB vs 48 MB) but duplicates code + names into the DWARF file, so
+	# the package ships ~18 MB MORE in total — and the debug build is only ever loaded by someone
+	# who is about to debug it. Embedded is what nilo.10/nilo.11 shipped and what gzips into the
+	# tarball well. Revisit via -sSEPARATE_DWARF_URL if the DWARF ever wants to live on a release
+	# asset instead of in the package.
 else()
 	set(EMCC_ARGS ${EMCC_ARGS} -O3)
 endif()
@@ -200,7 +220,9 @@ set(EMCC_WASM_ARGS ${EMCC_ARGS}
   -s WASM_BIGINT=1
   -s WASM=1)
 
-set(EMCC_WASM_COMPAT_ARGS ${EMCC_WASM_ARGS}
+set(EMCC_WASM_COMPAT_ARGS ${EMCC_ARGS}
+  -s WASM_BIGINT=1
+  -s WASM=1
   -s SINGLE_FILE=1)
 
 project("JoltPhysics.js")
@@ -233,7 +255,7 @@ set(JOLT_TYPING_RAW ${CMAKE_CURRENT_BINARY_DIR}/types.raw.d.ts)
 set(GEN_BINDINGS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen-bindings.mjs)
 add_custom_command(
 	OUTPUT ${JOLT_TYPING} ${JOLT_POST_GENERATED}
-	COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> -lembind --emit-tsd ${JOLT_TYPING_RAW}
+	COMMAND em++ ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> -lembind --emit-tsd ${JOLT_TYPING_RAW}
 		-s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME="Jolt" -s WASM_BIGINT=1
 		-s ENVIRONMENT=web,node,worker -o ${CMAKE_CURRENT_BINARY_DIR}/types-probe.mjs
 	COMMAND node ${GEN_BINDINGS}
@@ -245,12 +267,19 @@ add_custom_command(
 	VERBATIM)
 add_custom_target(jolt-typing ALL DEPENDS ${JOLT_TYPING} ${JOLT_POST_GENERATED})
 
-# multi-threaded.js references the worker module via a `replace_by_import(...)` placeholder so a
-# raw dynamic import() survives the emscripten/closure JS pipeline (see JoltPhysics.js issue #245).
-# Swap it back to a real `import` in the final bundles. Both the single-file compat build AND the
-# separate-.wasm sidecar carry the multi-threaded.js post-js on MT builds, so BOTH need the fixup;
-# there is exactly one occurrence (the call) in each, so a bare-word replace is safe.
-if (ENABLE_MULTI_THREADING)
+# Closure rewrites every dynamic import() to `replace_by_import(...)` (see CLOSURE_IMPORT_ARGS), so
+# a raw dynamic import() survives the emscripten/closure JS pipeline (JoltPhysics.js issue #245).
+# Swap it back to a real `import` in the final bundles.
+#
+# This is gated on closure actually running, NOT on ENABLE_MULTI_THREADING. multi-threaded.js is one
+# source of a dynamic import, but since emscripten 6.x the Node bootstrap emits `await
+# import("node:module")` in EVERY build — so single-threaded closure builds need the fixup too, or
+# they die at load with `ReferenceError: replace_by_import is not defined`. Debug builds link with
+# --closure=0, so nothing aliases and the replace is skipped.
+#
+# Both the single-file compat build and the separate-.wasm sidecar need it; the replace is a no-op
+# when no placeholder is present, so applying it unconditionally under closure is safe.
+if (USE_CLOSURE AND NOT JPH_DEV_FAST_LINK)
 	set(FIXUP_IMPORT_COMMAND         COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm-compat.js)
 	set(FIXUP_IMPORT_SIDECAR_COMMAND COMMAND perl -i -pe "s/replace_by_import/import/g" ${OUTPUT_BASE_NAME}.wasm.js)
 else()
@@ -262,7 +291,7 @@ endif()
 if (NOT BUILD_WASM_COMPAT_ONLY)
 	add_custom_command(
 		OUTPUT ${OUTPUT_BASE_NAME}.wasm.js ${OUTPUT_BASE_NAME}.wasm.wasm
-		COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
+		COMMAND em++ ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_ARGS} -o ${OUTPUT_BASE_NAME}.wasm.js
 		${FIXUP_IMPORT_SIDECAR_COMMAND}
 		DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 		COMMENT "Building JoltPhysics.js webassembly"
@@ -273,7 +302,7 @@ endif()
 if (NOT BUILD_WASM_SIDECAR_ONLY)
 add_custom_command(
 	OUTPUT ${OUTPUT_BASE_NAME}.wasm-compat.js
-	COMMAND emcc ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_COMPAT_ARGS} -o ${OUTPUT_BASE_NAME}.wasm-compat.js
+	COMMAND em++ ${JOLT_BINDINGS_OBJ} $<TARGET_FILE:Jolt> ${EMCC_WASM_COMPAT_ARGS} -o ${OUTPUT_BASE_NAME}.wasm-compat.js
 	${FIXUP_IMPORT_COMMAND}
 	DEPENDS jolt_bindings ${JOLT_BINDINGS_OBJ} ${JOLT_PRE_FILE} ${JOLT_POST_GENERATED} ${JOLT_TARGETS} ${JOLT_HEADER_FILE}
 	COMMENT "Building JoltPhysics.js compat webassembly"
