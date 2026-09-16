@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Default -BuildType Distribution matches ./build.sh with no args: a fast Debug non-compat preamble (ST only)
-    is built first with -DJPH_OUTPUT_NAME_SUFFIX=.debug so it emits dist\jolt-physics.debug.wasm.js +
+    is built first with -DCMAKE_BUILD_TYPE=Debug so it emits dist\jolt-physics.debug.wasm.js +
     dist\jolt-physics.debug.wasm.wasm without colliding with the Release outputs; then a full Distribution ST+MT
     build is run for the standard npm dist outputs; then d.ts shims and Examples/js copy.
 
@@ -23,7 +23,7 @@
 .PARAMETER BuildType
     Distribution (default), Release, or Debug - same primary CMAKE_BUILD_TYPE as ./build.sh $1.
     Debug skips the non-compat debug preamble (same as build.sh when BUILD_TYPE=Debug; the primary build
-    already emits .debug.wasm.* via JPH_OUTPUT_NAME_SUFFIX in that case).
+    already emits .debug.wasm.* from CMAKE_BUILD_TYPE=Debug in that case).
 
 .PARAMETER EmsdkRoot
     emsdk directory containing emsdk_env.ps1. Defaults to $env:EMSDK.
@@ -224,8 +224,8 @@ try {
     New-Item -ItemType Directory -Path "dist" | Out-Null
 
     # --- Preamble: Debug non-compat (ST only) so the npm package ships the .debug.wasm.{js,wasm} pair
-    # --- alongside the Release artifacts. JPH_OUTPUT_NAME_SUFFIX=.debug renames CMake's outputs in-place
-    # --- so no Move-Item / sed rewrites are needed. MT debug is intentionally dropped (no consumers).
+    # --- alongside the Release artifacts. CMakeLists derives the .debug infix from CMAKE_BUILD_TYPE, so
+    # --- no Move-Item / sed rewrites are needed. MT debug is intentionally dropped (no consumers).
     if ($BuildType -ne "Debug") {
         # Wipe Build\Debug\ST so a previous run's cached BUILD_WASM_COMPAT_ONLY=ON (from the
         # legacy preamble) cannot poison this fresh non-compat configure. We still pass
@@ -240,8 +240,7 @@ try {
         # closure link time.
         Invoke-EmcmakeBuild -BuildDir "Build/Debug/ST" -CMakeBuildType "Debug" -ExtraCmakeArgs @(
             "-DBUILD_WASM_COMPAT_ONLY=OFF",
-            "-DENABLE_SIMD=ON",
-            "-DJPH_OUTPUT_NAME_SUFFIX=.debug"
+            "-DENABLE_SIMD=ON"
         ) -Target "jolt-wasm"
         if (-not (Test-Path "dist\jolt-physics.debug.wasm.js")) {
             throw "Preamble did not produce dist\jolt-physics.debug.wasm.js"

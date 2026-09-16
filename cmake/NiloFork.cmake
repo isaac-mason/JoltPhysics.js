@@ -22,19 +22,11 @@ set(JOLT_REPLACE_IMPORT
     "${Python3_EXECUTABLE}" "${JOLT_BUILD_TOOLS}" replace-import-token
     CACHE INTERNAL "Nilo: post-emcc replace_by_import workaround command")
 
-# ---------------------------------------------------------------------------
-# Output filename suffix
-# ---------------------------------------------------------------------------
-# `-DJPH_OUTPUT_NAME_SUFFIX=.debug` from build.sh / build-windows.ps1 (Debug preamble)
-# lets a single dist/ folder hold both `jolt-physics.wasm.js` and
-# `jolt-physics.debug.wasm.js` side-by-side after a publish build. iter-build leaves
-# this empty so debug-iter outputs match Vite's local-iter alias filename.
-macro(nilo_apply_output_name_suffix)
-    if (NOT DEFINED JPH_OUTPUT_NAME_SUFFIX)
-        set(JPH_OUTPUT_NAME_SUFFIX "")
-    endif()
-    set(OUTPUT_BASE_NAME "${OUTPUT_BASE_NAME}${JPH_OUTPUT_NAME_SUFFIX}")
-endmacro()
+# NOTE: the old `nilo_apply_output_name_suffix()` / `-DJPH_OUTPUT_NAME_SUFFIX=.debug` mechanism is
+# gone. CMakeLists.txt now derives the `.debug` infix from CMAKE_BUILD_TYPE directly (see the
+# OUTPUT_BASE_NAME block), so a single dist/ still holds jolt-physics.wasm.js and
+# jolt-physics.debug.wasm.js side by side. Don't reintroduce the macro without removing that
+# block — applying both would produce `jolt-physics.debug.debug.wasm.js`.
 
 # ---------------------------------------------------------------------------
 # JoltPhysics C++ source (FetchContent override)
@@ -193,21 +185,9 @@ endmacro()
 #      pauses inside Jolt code. Unminified glue is 5-10 MB; with closure ~1-2 MB.
 #      Above ~3 MB DevTools' renderer becomes unreliable / OOMs.
 #
-# Set `JPH_DEV_FAST_LINK=ON` only for iteration sessions where DevTools is closed.
-# Sets `JPH_CLOSURE_ARGS` for use in `EMCC_ARGS`.
+# Set `JPH_DEV_FAST_LINK=ON` only for iteration sessions where DevTools is closed. The option is
+# consumed directly by CMakeLists.txt (`if (USE_CLOSURE AND NOT JPH_DEV_FAST_LINK)`), which builds
+# the closure flags inline — there is deliberately no macro here.
 option(JPH_DEV_FAST_LINK
     "Skip --closure=1 in emcc link to accelerate dev iteration. WARNING: produces a larger JS glue that can crash Chrome DevTools' Sources panel when paused inside Jolt code. Only enable for iteration sessions where DevTools is closed."
     OFF)
-
-macro(nilo_compute_closure_args)
-    if (JPH_DEV_FAST_LINK)
-        set(JPH_CLOSURE_ARGS "")
-        message(STATUS "JPH_DEV_FAST_LINK=ON: skipping --closure=1 in EMCC link (dev iteration mode)")
-    else()
-        set(JPH_CLOSURE_ARGS
-            --closure=1
-            --closure-args="--dynamic_import_alias=replace_by_import"
-            --closure-args="--externs"
-            --closure-args="${CMAKE_CURRENT_SOURCE_DIR}/extern-import.js")
-    endif()
-endmacro()
