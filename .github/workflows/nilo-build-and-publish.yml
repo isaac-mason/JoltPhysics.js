@@ -11,9 +11,13 @@ name: Nilo Build and Publish
 # It would otherwise also fire on push to main, fail the npm publish (no NPM_TOKEN), and
 # clobber the gh-pages branch.
 
+# Dispatch-only, deliberately. The publish/deploy steps are gated on
+# `github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true'`, which is TRUE for any
+# push — so a push trigger publishes a GitHub Release and force-pushes gh-pages with no dry-run
+# guard at all. The old `push: branches: [main]` was harmless only because `main` is a stale
+# upstream-tracking branch nobody pushes; pointing it at `nilo` would have armed it on every merge.
+# Releases are cut by hand anyway (see README "Publishing"), so the trigger bought nothing.
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       jpjs_ref:
