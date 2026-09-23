@@ -270,18 +270,23 @@ try {
     }
 
     # --- build.sh: full primary CMAKE_BUILD_TYPE ST then MT ---
-    # When -BuildType Debug, this is a developer-convenience mode: every artifact is Debug content
-    # under the Release name, no .debug.* artifacts produced, and dist/ is NOT publish-ready. Use
+    # When -BuildType Debug, this is a developer-convenience mode: CMAKE_BUILD_TYPE=Debug gives every
+    # output the .debug infix, so no release-named artifact is produced and dist/ is NOT publish-ready. Use
     # -BuildType Distribution (default) for a publish-quality dist with both Release + Debug artifacts.
     Write-Host "=== Primary: $BuildType ST + MT (full npm dist) ==="
     Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/ST" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
         "-DENABLE_SIMD=ON"
     )
-    # Release MT flavour: not used by Nilo, but the threaded Examples import it. Debug MT is not built.
-    Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/MT" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
-        "-DENABLE_MULTI_THREADING=ON",
-        "-DENABLE_SIMD=ON"
-    )
+    # Release MT flavour: not used by Nilo, but the threaded Examples import it. Guarded because
+    # CMAKE_BUILD_TYPE=Debug here would produce a DEBUG MT build, which neither script ships and
+    # which the stale-sweep below deletes -- pure wasted link time. build.sh likewise builds MT
+    # only in its non-Debug branch.
+    if ($BuildType -ne "Debug") {
+        Invoke-EmcmakeBuild -BuildDir "Build/$BuildType/MT" -CMakeBuildType $BuildType -ExtraCmakeArgs @(
+            "-DENABLE_MULTI_THREADING=ON",
+            "-DENABLE_SIMD=ON"
+        )
+    }
 
     # --- d.ts shims (one canonical file, copied to each entrypoint's expected name) ---
     $dts = "import Jolt from ""./types"";`n`nexport default Jolt;`nexport * from ""./types"";`n`n"
@@ -316,11 +321,6 @@ try {
             "dist\jolt-physics.js",
             "dist\jolt-physics.d.ts",
             "dist\jolt-physics.multithread.d.ts",
-            "dist\jolt-physics.multithread.wasm.js",
-            "dist\jolt-physics.multithread.wasm.d.ts",
-            "dist\jolt-physics.multithread.wasm.wasm",
-            "dist\jolt-physics.multithread.wasm-compat.js",
-            "dist\jolt-physics.multithread.wasm-compat.d.ts",
             "dist\jolt-physics.debug.multithread.wasm.js",
             "dist\jolt-physics.debug.multithread.wasm.d.ts",
             "dist\jolt-physics.debug.multithread.wasm.wasm",
@@ -335,21 +335,22 @@ try {
 
     # Validate dist matches package.json "files" (dist entries + types.d.ts).
     # Debug-named artifacts only exist when a Debug-non-compat preamble ran (i.e. BuildType != Debug).
-    $requiredDist = @(
-        "dist\jolt-physics.wasm-compat.js",
-        "dist\jolt-physics.wasm-compat.d.ts",
-        "dist\jolt-physics.wasm.js",
-        "dist\jolt-physics.wasm.d.ts",
-        "dist\jolt-physics.wasm.wasm",
-        "dist\jolt-physics.multithread.wasm-compat.js",
-        "dist\jolt-physics.multithread.wasm-compat.d.ts",
-        "dist\jolt-physics.multithread.wasm.js",
-        "dist\jolt-physics.multithread.wasm.d.ts",
-        "dist\jolt-physics.multithread.wasm.wasm",
-        "dist\types.d.ts"
-    )
+    # -BuildType Debug is a developer-convenience mode: CMAKE_BUILD_TYPE=Debug gives every output the
+    # .debug infix, so NO release-named artifact is produced and dist/ is not publish-ready. Only the
+    # publish path (non-Debug) can assert the full package contract.
+    $requiredDist = @("dist\types.d.ts")
     if ($BuildType -ne "Debug") {
         $requiredDist += @(
+            "dist\jolt-physics.wasm-compat.js",
+            "dist\jolt-physics.wasm-compat.d.ts",
+            "dist\jolt-physics.wasm.js",
+            "dist\jolt-physics.wasm.d.ts",
+            "dist\jolt-physics.wasm.wasm",
+            "dist\jolt-physics.multithread.wasm-compat.js",
+            "dist\jolt-physics.multithread.wasm-compat.d.ts",
+            "dist\jolt-physics.multithread.wasm.js",
+            "dist\jolt-physics.multithread.wasm.d.ts",
+            "dist\jolt-physics.multithread.wasm.wasm",
             "dist\jolt-physics.debug.wasm.js",
             "dist\jolt-physics.debug.wasm.d.ts",
             "dist\jolt-physics.debug.wasm.wasm",
