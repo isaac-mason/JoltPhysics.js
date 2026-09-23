@@ -3,11 +3,17 @@
     Configure + build JoltPhysics.js on Windows (Emscripten), using a local Jolt core tree instead of FetchContent Git.
 
 .DESCRIPTION
-    Default -BuildType Distribution matches ./build.sh with no args: a fast Debug non-compat preamble (ST only)
-    is built first with -DCMAKE_BUILD_TYPE=Debug so it emits dist\jolt-physics.debug.wasm.js +
-    dist\jolt-physics.debug.wasm.wasm without colliding with the Release outputs; then a full Distribution ST
-    build is run for the standard npm dist outputs; then d.ts shims and Examples/js copy.
-    Only the release multi-threaded flavour is built/shipped; debug MT is not (see build.sh).
+    Default -BuildType Distribution matches ./build.sh with no args, and builds the same four passes:
+
+      Build/Debug/SidecarST  -DBUILD_WASM_SIDECAR_ONLY=ON -DJPH_FULL_DWARF=ON  -> ./debug-wasm
+      Build/Debug/ST         -DBUILD_WASM_COMPAT_ONLY=ON                       -> ./debug-wasm-compat
+      Build/<Type>/ST                                                          -> ./wasm, ./wasm-compat
+      Build/<Type>/MT        -DENABLE_MULTI_THREADING=ON                       -> ./wasm-multithread, ...
+
+    ...then d.ts shims and the Examples/js copy. CMAKE_BUILD_TYPE=Debug gives the .debug infix, so the
+    Debug and Release artifacts coexist in one dist/ with no renaming. Build dir names match build.sh
+    on purpose: every exported flavour must be produced by BOTH scripts or a Windows-built package
+    ships a dangling export. Only the release multi-threaded flavour is built; debug MT is not.
 
     Prefer the non-compat debug build (debug-wasm) for C++ debugging: the
     wasm-compat debug variants embed a multi-MB base64 WASM blob in JS, which crashes Chrome DevTools
@@ -225,33 +231,41 @@ try {
     }
     New-Item -ItemType Directory -Path "dist" | Out-Null
 
-    # --- Preamble: Debug non-compat (ST only) so the npm package ships the .debug.wasm.{js,wasm} pair
-    # --- alongside the Release artifacts. CMakeLists derives the .debug infix from CMAKE_BUILD_TYPE, so
-    # --- no Move-Item / sed rewrites are needed. MT debug is intentionally dropped (no consumers).
+    # --- Debug preamble: BOTH debug flavours the package exports, mirroring build.sh's two Debug
+    # --- passes. Build dir names match build.sh deliberately (Debug/ST = compat, Debug/SidecarST =
+    # --- sidecar) so the two scripts can't drift into building different things. CMakeLists derives
+    # --- the .debug infix from CMAKE_BUILD_TYPE, so no Move-Item / sed rewrites are needed.
+    # --- MT debug is intentionally dropped (no consumers, never shipped).
     if ($BuildType -ne "Debug") {
-        # Wipe Build\Debug\ST so a previous run's cached BUILD_WASM_COMPAT_ONLY=ON (from the
-        # legacy preamble) cannot poison this fresh non-compat configure. We still pass
-        # BUILD_WASM_COMPAT_ONLY=OFF explicitly as defense-in-depth in case someone passes
-        # a non-empty pre-existing Build dir.
-        if (Test-Path "Build\Debug\ST") {
-            Remove-Item -Recurse -Force "Build\Debug\ST"
+        # Wipe both Debug dirs: an older layout used Debug/ST for the NON-compat build, so a stale
+        # cache there would fight the explicit -D flags below.
+        foreach ($d in @("Build\Debug\ST", "Build\Debug\SidecarST")) {
+            if (Test-Path $d) { Remove-Item -Recurse -Force $d }
         }
-        Write-Host "=== Preamble: Debug non-compat ST (jolt-physics.debug.wasm.{js,wasm}) ==="
-        # --target jolt-wasm so the preamble doesn't also build jolt-wasm-compat (the variant whose
-        # DevTools-crash behaviour is the whole reason this preamble exists). Saves ~30-60 s of
-        # closure link time.
-        Invoke-EmcmakeBuild -BuildDir "Build/Debug/ST" -CMakeBuildType "Debug" -ExtraCmakeArgs @(
-            "-DBUILD_WASM_COMPAT_ONLY=OFF",
+
+        # ./debug-wasm — the sidecar Nilo sets C++ breakpoints in. Full DWARF; matches build.sh's
+        # Build/Debug/SidecarST pass.
+        Write-Host "=== Preamble: Debug sidecar ST (jolt-physics.debug.wasm.{js,wasm}) ==="
+        Invoke-EmcmakeBuild -BuildDir "Build/Debug/SidecarST" -CMakeBuildType "Debug" -ExtraCmakeArgs @(
+            "-DBUILD_WASM_SIDECAR_ONLY=ON",
             "-DENABLE_SIMD=ON",
-            # Full DWARF: this preamble emits the ./debug-wasm sidecar Nilo sets C++ breakpoints in.
-            # Matches build.sh's Build/Debug/SidecarST pass.
             "-DJPH_FULL_DWARF=ON"
-        ) -Target "jolt-wasm"
-        if (-not (Test-Path "dist\jolt-physics.debug.wasm.js")) {
-            throw "Preamble did not produce dist\jolt-physics.debug.wasm.js"
+        )
+        foreach ($f in @("dist\jolt-physics.debug.wasm.js", "dist\jolt-physics.debug.wasm.wasm")) {
+            if (-not (Test-Path $f)) { throw "Debug sidecar preamble did not produce $f" }
         }
-        if (-not (Test-Path "dist\jolt-physics.debug.wasm.wasm")) {
-            throw "Preamble did not produce dist\jolt-physics.debug.wasm.wasm"
+
+        # ./debug-wasm-compat — source maps, not DWARF (the base64-embedded form crashes DevTools on
+        # C++ breakpoints, so it is the fallback for hosts that can't serve a sidecar). Without this
+        # pass the Windows package shipped a DANGLING ./debug-wasm-compat export: the d.ts shim and
+        # package.json entry existed but the .js was never built. Matches build.sh's Debug/ST pass.
+        Write-Host "=== Preamble: Debug compat ST (jolt-physics.debug.wasm-compat.js) ==="
+        Invoke-EmcmakeBuild -BuildDir "Build/Debug/ST" -CMakeBuildType "Debug" -ExtraCmakeArgs @(
+            "-DBUILD_WASM_COMPAT_ONLY=ON",
+            "-DENABLE_SIMD=ON"
+        )
+        if (-not (Test-Path "dist\jolt-physics.debug.wasm-compat.js")) {
+            throw "Debug compat preamble did not produce dist\jolt-physics.debug.wasm-compat.js"
         }
     }
 
@@ -338,7 +352,9 @@ try {
         $requiredDist += @(
             "dist\jolt-physics.debug.wasm.js",
             "dist\jolt-physics.debug.wasm.d.ts",
-            "dist\jolt-physics.debug.wasm.wasm"
+            "dist\jolt-physics.debug.wasm.wasm",
+            "dist\jolt-physics.debug.wasm-compat.js",
+            "dist\jolt-physics.debug.wasm-compat.d.ts"
         )
     }
     $missing = @()
