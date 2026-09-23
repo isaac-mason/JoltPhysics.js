@@ -10,25 +10,34 @@
 
 cmake_minimum_required(VERSION 3.13)
 
-# Python helpers for cross-platform glue codegen (replaces upstream's `cat` / `sed`
+# Python helpers for cross-platform glue codegen (replaces upstream's `cat` / `sed` / `perl`
 # invocations so Windows Ninja, which uses cmd.exe, can build without GNU coreutils).
-# Used three places in CMakeLists.txt:
-#   - REMOVE_THREAD_LOCAL custom command (strip thread_local from glue.cpp on ST builds)
-#   - the IDL concat custom command
-#   - the post-emcc replace_by_import workaround (emscripten#245)
+# Now used in exactly ONE place: the post-emcc replace_by_import workaround (emscripten#245).
+# The other two consumers (REMOVE_THREAD_LOCAL and the IDL concat) were WebIDL-binder steps and
+# went away with the embind rewrite — glue.cpp and the .idl no longer exist.
 set(JOLT_BUILD_TOOLS "${CMAKE_CURRENT_SOURCE_DIR}/build-tools/jolt_codegen_helpers.py"
     CACHE INTERNAL "Nilo: path to Python codegen helpers")
 # Python3_EXECUTABLE is only defined once find_package has run, and this file is included before
 # anything else would trigger it — without this, JOLT_REPLACE_IMPORT expanded to an EMPTY program
 # name and the helper was unusable (which is why CMakeLists.txt called `perl` directly instead).
-# The interpreter is a HOST build tool, but the Emscripten toolchain re-roots program lookup at the
-# sysroot — so force host search for the duration of this find_package, then restore.
-set(_nilo_saved_find_root_program "${CMAKE_FIND_ROOT_PATH_MODE_PROGRAM}")
-set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM "${_nilo_saved_find_root_program}")
+# Prefer the interpreter emsdk ships and exports from emsdk_env.{sh,ps1}. Anywhere emcc can run,
+# that python exists by construction — so this avoids making CMake's Python discovery a new hard
+# build dependency (a REQUIRED find_package that misses would fail the release build outright).
+# Fall back to a host lookup for anyone driving cmake without having sourced emsdk_env.
+if (DEFINED ENV{EMSDK_PYTHON} AND EXISTS "$ENV{EMSDK_PYTHON}")
+    set(NILO_PYTHON "$ENV{EMSDK_PYTHON}")
+else()
+    # The interpreter is a HOST build tool, but the Emscripten toolchain re-roots program lookup at
+    # the sysroot — force host search for the duration of this find_package, then restore.
+    set(_nilo_saved_find_root_program "${CMAKE_FIND_ROOT_PATH_MODE_PROGRAM}")
+    set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM "${_nilo_saved_find_root_program}")
+    set(NILO_PYTHON "${Python3_EXECUTABLE}")
+endif()
+message(STATUS "Nilo: codegen helper interpreter: ${NILO_PYTHON}")
 set(JOLT_REPLACE_IMPORT
-    "${Python3_EXECUTABLE}" "${JOLT_BUILD_TOOLS}" replace-import-token
+    "${NILO_PYTHON}" "${JOLT_BUILD_TOOLS}" replace-import-token
     CACHE INTERNAL "Nilo: post-emcc replace_by_import workaround command")
 
 # NOTE: the old `nilo_apply_output_name_suffix()` / `-DJPH_OUTPUT_NAME_SUFFIX=.debug` mechanism is
